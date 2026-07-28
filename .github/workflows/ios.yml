@@ -58,43 +58,55 @@ jobs:
 
       - name: Verify IPA contents
         run: |
-          fail() {
-            echo "::error::$1"
-            exit 1
-          }
-          read_plist() {
-            local key="$1"
-            local file="$2"
-            local value
-            value=$(plutil -extract "$key" raw -o - "$file" 2>&1) || fail "Cannot read $key from $file: $value"
-            echo "$value"
-          }
           rm -rf ipa-check
           mkdir ipa-check
           unzip -q ShareToObsidian.ipa -d ipa-check
-          APP=$(find ipa-check/Payload -maxdepth 1 -name "*.app" -type d -print -quit)
-          if [ -z "$APP" ]; then
-            echo "No app bundle found in IPA Payload"
-            find ipa-check -maxdepth 3 -print
-            fail "No app bundle found in IPA Payload"
-          fi
-          EXTENSION=$(find "$APP/PlugIns" -maxdepth 1 -name "*.appex" -type d -print -quit 2>/dev/null || true)
-          if [ -z "$EXTENSION" ]; then
-            echo "Share Extension is missing from IPA."
-            find "$APP" -maxdepth 3 -print
-            fail "Share Extension is missing from IPA."
-          fi
-          test -f "$APP/Info.plist" || fail "App Info.plist is missing: $APP/Info.plist"
-          test -f "$EXTENSION/Info.plist" || fail "Extension Info.plist is missing: $EXTENSION/Info.plist"
-          APP_BUNDLE_ID=$(read_plist "CFBundleIdentifier" "$APP/Info.plist")
-          EXTENSION_BUNDLE_ID=$(read_plist "CFBundleIdentifier" "$EXTENSION/Info.plist")
-          URL_SCHEME=$(read_plist "CFBundleURLTypes.0.CFBundleURLSchemes.0" "$APP/Info.plist")
-          EXTENSION_POINT=$(read_plist "NSExtension.NSExtensionPointIdentifier" "$EXTENSION/Info.plist")
-          [ "$APP_BUNDLE_ID" = "com.hdwei.ShareToObsidian" ] || fail "Unexpected app bundle id: $APP_BUNDLE_ID"
-          [ "$EXTENSION_BUNDLE_ID" = "com.hdwei.ShareToObsidian.ShareExtension" ] || fail "Unexpected extension bundle id: $EXTENSION_BUNDLE_ID"
-          [ "$URL_SCHEME" = "sharetoobsidian" ] || fail "Unexpected app pairing URL scheme: $URL_SCHEME"
-          [ "$EXTENSION_POINT" = "com.apple.share-services" ] || fail "Unexpected extension point: $EXTENSION_POINT"
-          echo "IPA content verification passed."
+          python3 - <<'PY'
+          import glob
+          import plistlib
+          import sys
+          from pathlib import Path
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+          apps = list(Path("ipa-check/Payload").glob("*.app"))
+          if not apps:
+              fail("No app bundle found in IPA Payload.")
+          app = apps[0]
+          extensions = list((app / "PlugIns").glob("*.appex"))
+          if not extensions:
+              fail("Share Extension is missing from IPA.")
+          extension = extensions[0]
+
+          with (app / "Info.plist").open("rb") as handle:
+              app_info = plistlib.load(handle)
+          with (extension / "Info.plist").open("rb") as handle:
+              extension_info = plistlib.load(handle)
+
+          app_bundle_id = app_info.get("CFBundleIdentifier")
+          extension_bundle_id = extension_info.get("CFBundleIdentifier")
+          url_scheme = (
+              app_info.get("CFBundleURLTypes", [{}])[0]
+              .get("CFBundleURLSchemes", [None])[0]
+          )
+          extension_point = extension_info.get("NSExtension", {}).get("NSExtensionPointIdentifier")
+
+          checks = {
+              "app bundle id": (app_bundle_id, "com.hdwei.ShareToObsidian"),
+              "extension bundle id": (extension_bundle_id, "com.hdwei.ShareToObsidian.ShareExtension"),
+              "pairing URL scheme": (url_scheme, "sharetoobsidian"),
+              "extension point": (extension_point, "com.apple.share-services"),
+          }
+          for label, (actual, expected) in checks.items():
+              if actual != expected:
+                  fail(f"Unexpected {label}: {actual!r}, expected {expected!r}.")
+
+          print(f"Verified app: {app}")
+          print(f"Verified extension: {extension}")
+          print("IPA content verification passed.")
+          PY
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
