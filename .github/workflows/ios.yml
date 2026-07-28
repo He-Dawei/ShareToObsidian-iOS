@@ -1,4 +1,4 @@
-name: iOS Build
+name: iOS Build — ShareToObsidian
 
 on:
   push:
@@ -9,22 +9,28 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest  # macOS 跑者
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16.0'
 
-      - name: Build
+      - name: Build App + Extension
         run: |
           xcodebuild \
-            -project YourApp.xcodeproj \
-            -scheme YourApp \
+            -project ShareToObsidian.xcodeproj \
+            -scheme ShareToObsidian \
             -sdk iphoneos \
             -configuration Release \
             -destination 'generic/platform=iOS' \
@@ -33,10 +39,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Upload IPA
+      - name: Upload App
         uses: actions/upload-artifact@v4
         with:
-          name: iOS-App
+          name: ShareToObsidian-iOS
           path: |
             build/Release-iphoneos/*.app
-            **/*.ipa
+            **/*.app

@@ -1,0 +1,67 @@
+# Mac 验证清单
+
+## 编译
+
+```bash
+cd outputs/share-to-obsidian-ios
+chmod +x Scripts/verify_mac_ios_project.sh
+./Scripts/verify_mac_ios_project.sh
+```
+
+该脚本会检查：
+
+- App 与 Share Extension 都启用同一个 App Group。
+- App 声明 Background fetch 与 BGTask identifier。
+- App 与 Share Extension 都声明 Local Network 权限说明。
+- Share Extension 类型为 `com.apple.share-services`。
+- XcodeGen 能生成工程。
+- iOS Simulator Debug 构建成功。
+- 构建产物内嵌 Share Extension。
+- 主 App 和 Share Extension Bundle ID 正确。
+
+## 真机 Build 验证
+
+如果 Mac 已登录 Apple Developer Team，并且 Xcode 签名配置可用，执行：
+
+```bash
+cd outputs/share-to-obsidian-ios
+DEVELOPMENT_TEAM=你的TeamID VERIFY_DEVICE=1 ./Scripts/verify_mac_ios_project.sh
+```
+
+指定具体设备：
+
+```bash
+DEVELOPMENT_TEAM=你的TeamID VERIFY_DEVICE=1 DEVICE_DESTINATION='platform=iOS,id=设备UDID' ./Scripts/verify_mac_ios_project.sh
+```
+
+真机 build 通过后，再做下面的手工分享链路验收。
+
+## 真机配置
+
+- 主 App Bundle ID: `com.hdwei.ShareToObsidian`
+- Share Extension Bundle ID: `com.hdwei.ShareToObsidian.ShareExtension`
+- App Group: `group.com.hdwei.ShareToObsidian`
+- 主 App Capability:
+  - App Groups
+  - Background Modes: Background fetch
+- Share Extension Capability:
+  - App Groups
+
+## 真机验收
+
+1. 在 App 设置页填入 Windows Bridge URL：`http://电脑局域网IP:8765`。
+2. 或在 Windows 执行 `Bridge/write_pairing_config.ps1`，把 `pairing.local.json` 内容粘贴到 App 设置页“快速配对”并导入。
+3. 点“检查连接”，应显示桥接器在线。
+4. 从抖音/B站/网页分享链接到 `ShareToObsidian`。
+5. 如果 Windows Bridge 在线，分享扩展应直接用 fast 模式尝试同步；Obsidian 可在不手动打开 App 的情况下出现新笔记。
+6. 回到 App，列表应出现新收藏，并显示同步状态。
+7. 进入详情页，刷新视频信息，应看到作者/频道、简介、时长、播放/点赞、封面链接等可用字段。
+8. 确认可以编辑 Markdown，并可重新生成 3 种文案。
+9. 点同步，Windows Obsidian 应出现新笔记。
+10. 删除已同步收藏，Obsidian 对应笔记和原始 JSON 应移动到 `移动收藏/80_Trash/`。
+11. 关闭 Windows Bridge 后再分享一条，App 应保留为待同步。
+12. 恢复 Windows Bridge，App 前台/回前台/后台刷新触发后应补同步。
+
+## 注意
+
+iOS Background App Refresh 由系统调度，不能保证电脑开机瞬间触发。可靠路径是：App 前台、回到前台、手动同步；后台刷新是额外补偿机制。
