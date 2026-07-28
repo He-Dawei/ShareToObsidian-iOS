@@ -138,7 +138,31 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\download_latest_standalone.ps
 4. 把 `E:\claude code生成文件\ShareToObsidian-standalone-latest.ipa` 传到 iPhone。
 5. 用 SideStore 安装。免费签名 7 天有效，iPhone 和电脑同 WiFi 时由 SideStore 自动续签。
 
-说明：Windows 不支持 AirDrop。可用 iCloud Drive、微信文件传输、LocalSend、数据线文件共享等方式把 IPA 传到 iPhone。standalone 版本不包含系统分享扩展，只用于主 App 内粘贴链接/同步验收。
+说明：Windows 不支持 AirDrop。可用 iCloud Drive、微信文件传输、LocalSend、数据线文件共享等方式把 IPA 传到 iPhone。
+
+standalone 版本不包含原生系统分享扩展，但支持 URL Scheme，可以配合 iOS 快捷指令从分享面板保存链接。
+
+URL Scheme：
+
+```text
+sharetoobsidian://capture?url=https%3A%2F%2Fexample.com%2Fvideo&title=%E6%A0%87%E9%A2%98
+```
+
+也支持：
+
+```text
+sharetoobsidian://add?url=...
+sharetoobsidian://share?text=...
+```
+
+iOS 快捷指令建议：
+
+1. 新建快捷指令，开启“在共享表单中显示”。
+2. 接收“URL”和“文本”。
+3. 对分享输入执行“URL 编码”。
+4. 打开 URL：`sharetoobsidian://capture?url=编码后的输入`。
+
+触发后 App 会把链接加入待同步队列，并立即尝试同步到 Windows Bridge。电脑离线时保留队列，之后打开 App 会继续同步。
 
 默认 Obsidian 输出目录：
 

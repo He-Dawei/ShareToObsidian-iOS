@@ -813,6 +813,11 @@ $captureListModelText = Get-Content -LiteralPath (Join-Path $repoRoot "App\Captu
 foreach ($needle in @(
     "clearLastError",
     "func add(urlText: String) -> Bool",
+    "func handleDeepLink(_ url: URL) async",
+    "case `"capture`", `"add`", `"share`":",
+    "private static func capturePayload(from url: URL)",
+    "sharetoobsidian",
+    "URL Scheme",
     "SupportedShareURL.isSupported(url)",
     "func createVerificationCapture() async",
     "https://example.com/share-to-obsidian-ios-verify",
@@ -894,7 +899,7 @@ foreach ($needle in @(
     "let updated = await model.regenerateDrafts(for: item)",
     "let updated = await model.refreshMetadata(for: item)",
     ".onOpenURL { url in",
-    "await model.importPairing(url: url)",
+    "await model.handleDeepLink(url)",
     "searchText",
     "visibleItems",
     "searchableText(for: item)",
@@ -925,6 +930,9 @@ if (-not [regex]::IsMatch($contentViewText, $metadataSyncPattern)) {
 }
 if (-not $contentViewText.Contains(".searchable(text: `$searchText")) {
     throw "ContentView missing searchable list support."
+}
+if ($contentViewText.Contains("await model.importPairing(url: url)")) {
+    throw "ContentView must route all app scheme URLs through handleDeepLink."
 }
 
 $thumbnailViewText = Get-Content -LiteralPath (Join-Path $repoRoot "App\CaptureThumbnailView.swift") -Raw -Encoding UTF8
@@ -1046,12 +1054,33 @@ $badNeedles = @(
     @(32457,35826,23017),
     @(37824,24816,26828),
     @(37647,20905,26271),
-    @(29785,21979)
+    @(29785,21979),
+    @(32494,27199),
+    @(38334,28844),
+    @(37837,31295),
+    @(37722,23678),
+    @(37922,20291),
+    @(22935,12518),
+    @(37413)
 )
+$swiftTextToScan = @(
+    "App\ContentView.swift",
+    "App\CaptureListModel.swift",
+    "App\CaptureEditorView.swift",
+    "App\SettingsView.swift",
+    "Shared\CaptureItem.swift",
+    "Shared\CaptureFileStore.swift",
+    "Shared\CaptureSyncRunner.swift",
+    "Shared\MarkdownGenerator.swift",
+    "ShareExtension\ShareViewController.swift"
+) | ForEach-Object {
+    Get-Content -LiteralPath (Join-Path $repoRoot $_) -Raw -Encoding UTF8
+}
+$swiftTextToScan = $swiftTextToScan -join "`n"
 foreach ($codePoints in $badNeedles) {
     $badNeedle = New-TextFromCodePoints $codePoints
-    if ($markdownGeneratorText -like "*$badNeedle*") {
-        throw "MarkdownGenerator contains mojibake-looking text: $badNeedle"
+    if ($swiftTextToScan -like "*$badNeedle*") {
+        throw "Swift source contains mojibake-looking text: $badNeedle"
     }
 }
 Write-Host "iOS static project check passed."

@@ -97,8 +97,7 @@ struct ContentView: View {
         }
         .onOpenURL { url in
             Task {
-                await model.importPairing(url: url)
-                await model.syncIfPossible()
+                await model.handleDeepLink(url)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in

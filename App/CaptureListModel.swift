@@ -51,6 +51,35 @@ final class CaptureListModel {
         }
     }
 
+    func handleDeepLink(_ url: URL) async {
+        guard url.scheme?.lowercased() == "sharetoobsidian" else {
+            lastError = "不支持的 App 链接"
+            return
+        }
+
+        switch url.host?.lowercased() {
+        case "pair":
+            await importPairing(url: url)
+            await syncIfPossible()
+        case "capture", "add", "share":
+            guard let payload = Self.capturePayload(from: url) else {
+                lastError = "分享链接里没有可保存的 http/https 链接"
+                return
+            }
+            do {
+                let savedItem = try enqueue(url: payload.url, title: payload.title, sourceApp: "URL Scheme")
+                reload()
+                lastError = nil
+                lastStatusMessage = "已从外部链接加入队列，正在同步"
+                await syncQueued(prioritizedIDs: [savedItem.id])
+            } catch {
+                lastError = error.localizedDescription
+            }
+        default:
+            lastError = "不支持的 App 链接"
+        }
+    }
+
     func createVerificationCapture() async {
         guard let url = URL(string: "https://example.com/share-to-obsidian-ios-verify"),
               SupportedShareURL.isSupported(url) else {
@@ -277,6 +306,14 @@ final class CaptureListModel {
         }
     }
 
+    @discardableResult
+    private func enqueue(url: URL, title: String, sourceApp: String?) throws -> CaptureItem {
+        var item = CaptureItem(url: url, title: title, sourceApp: sourceApp)
+        item.status = .queued
+        item.syncError = nil
+        return try CaptureFileStore.append(item)
+    }
+
     private func persist(deletedIDs: Set<UUID> = []) {
         do {
             let snapshot = items
@@ -334,5 +371,49 @@ final class CaptureListModel {
             return "还有 \(summary.queuedCount) 条等待同步"
         }
         return "没有待同步内容"
+    }
+
+    private static func capturePayload(from url: URL) -> (url: URL, title: String)? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let queryItems = components.queryItems ?? []
+        let title = firstQueryValue(named: "title", in: queryItems) ?? ""
+
+        for name in ["url", "link"] {
+            if let value = firstQueryValue(named: name, in: queryItems),
+               let capturedURL = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+               SupportedShareURL.isSupported(capturedURL) {
+                return (capturedURL, title)
+            }
+        }
+
+        if let text = firstQueryValue(named: "text", in: queryItems),
+           let capturedURL = firstSupportedURL(in: text) {
+            let fallbackTitle = title.isEmpty ? firstNonURLLine(in: text) : title
+            return (capturedURL, fallbackTitle)
+        }
+
+        return nil
+    }
+
+    private static func firstQueryValue(named name: String, in queryItems: [URLQueryItem]) -> String? {
+        queryItems.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
+    }
+
+    private static func firstSupportedURL(in text: String) -> URL? {
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return detector?
+            .matches(in: text, range: range)
+            .compactMap(\.url)
+            .first(where: { SupportedShareURL.isSupported($0) })
+    }
+
+    private static func firstNonURLLine(in text: String) -> String {
+        text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty && firstSupportedURL(in: $0) == nil } ?? ""
     }
 }
