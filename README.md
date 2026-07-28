@@ -98,6 +98,30 @@ cd C:\Users\44527\ios-project\Bridge
 
 然后用输出的 `Bridge URL`，把末尾改成 `/pair`。该页面包含 Bridge Token，只在自己的 iPhone 上打开。
 
+## 分享扩展验收
+
+`ShareToObsidian-standalone.ipa` 只用于验证主 App 内同步，不包含系统分享入口。
+要验证“抖音/哔哩哔哩/Safari 分享面板 -> Save to Obsidian”，安装 full IPA：
+
+```text
+E:\claude code生成文件\ShareToObsidian-full-runXX.ipa
+```
+
+安装 full IPA 后，在 Windows 运行：
+
+```powershell
+cd C:\Users\44527\ios-project
+powershell -ExecutionPolicy Bypass -File .\Scripts\wait_for_share_extension_verification.ps1
+```
+
+脚本开始等待后，在 iPhone Safari 打开或输入：
+
+```text
+https://example.com/share-to-obsidian-share-extension-verify
+```
+
+点系统分享按钮，选择 `Save to Obsidian`。Windows 端出现 `SHARE_EXTENSION_VERIFICATION_OK` 即表示分享扩展链路已通过。
+
 默认 Obsidian 输出目录：
 
 `E:\44527\Documents\claude仓库\移动收藏`

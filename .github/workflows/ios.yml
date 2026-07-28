@@ -39,11 +39,24 @@ jobs:
           APP=$(find /tmp/xcode-build -maxdepth 4 -name "*.app" -type d | grep -v "\.appex" | head -1)
           mkdir -p Payload && cp -r "$APP" Payload/
           zip -r ShareToObsidian.ipa Payload && ls -lh ShareToObsidian.ipa
+      - name: Verify share extension in IPA
+        run: unzip -l ShareToObsidian.ipa | grep -q 'Payload/.*\.app/PlugIns/.*\.appex/Info.plist'
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: ShareToObsidian
           path: ShareToObsidian.ipa
+      - name: Publish full release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete full-latest --yes --cleanup-tag || true
+          git tag -f full-latest
+          git push origin -f full-latest
+          gh release create full-latest ShareToObsidian.ipa \
+            --title "ShareToObsidian full latest" \
+            --notes "Built from $GITHUB_SHA. Includes Share Extension."
 
   standalone:
     runs-on: macos-latest
