@@ -1,0 +1,6 @@
+Bridge/bridge.config.json
+Bridge/pairing.*.json
+Bridge/pairing.*.txt
+Bridge/pairing.*.html
+Bridge/__pycache__/
+*.pyc

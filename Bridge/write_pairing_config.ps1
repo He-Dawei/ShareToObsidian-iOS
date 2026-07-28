@@ -1,7 +1,8 @@
 param(
     [string]$ConfigPath = ".\bridge.config.json",
     [string]$OutputPath = ".\pairing.local.json",
-    [switch]$RotateToken
+    [switch]$RotateToken,
+    [switch]$ShowSecret
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,5 +54,10 @@ $VaultPairingPath = Join-Path (Join-Path $Config.obsidian_vault $Config.notes_su
 Write-Host "Wrote pairing config:"
 Write-Host $OutputFullPath
 Write-Host $VaultPairingPath
-Write-Host ""
-Write-Host $Json
+Write-Host "Bridge URL: $BridgeURL"
+Write-Host "Token: hidden. Use -ShowSecret only if you need to inspect the JSON."
+
+if ($ShowSecret) {
+    Write-Host ""
+    Write-Host $Json
+}

@@ -127,6 +127,10 @@ $taskActionText = ($newTask.Actions | ForEach-Object { "$($_.Execute) $($_.Argum
 if (-not $taskActionText.Contains("start_bridge.ps1")) {
     throw "ShareToObsidianBridge task must launch Bridge\start_bridge.ps1."
 }
+$expectedBridgeDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "Bridge"))
+if ($taskActionText.IndexOf($expectedBridgeDir, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw "ShareToObsidianBridge task points outside current repo Bridge: $taskActionText"
+}
 if ([string]$newTask.Settings.MultipleInstances -ne "IgnoreNew") {
     throw "ShareToObsidianBridge task MultipleInstances must be IgnoreNew."
 }
@@ -308,6 +312,7 @@ $requiredFiles = @(
     "Bridge\start_bridge.ps1",
     "Bridge\ensure_firewall_rule.ps1",
     "Bridge\export_pairing_for_iphone.ps1",
+    "Bridge\bridge.config.example.json",
     "Scripts\export_mac_build_package.ps1",
     "Scripts\wait_for_iphone_verification.ps1",
     "ShareExtension\Info.plist",
@@ -325,6 +330,44 @@ foreach ($relative in $requiredFiles) {
     $path = Join-Path $repoRoot $relative
     if (-not (Test-Path -LiteralPath $path)) {
         throw "Missing iOS project file: $relative"
+    }
+}
+
+$gitTrackedSensitiveFiles = & git -C $repoRoot ls-files `
+    "Bridge/bridge.config.json" `
+    "Bridge/pairing.local.json" `
+    "Bridge/pairing.iphone.json" `
+    "Bridge/pairing.iphone.url.txt" `
+    "Bridge/pairing.iphone.html" `
+    "Bridge/__pycache__/obsidian_bridge.cpython-312.pyc"
+if ($gitTrackedSensitiveFiles) {
+    throw "Sensitive/generated Bridge files must not be tracked by Git: $($gitTrackedSensitiveFiles -join ', ')"
+}
+
+$gitignoreText = Get-Content -LiteralPath (Join-Path $repoRoot ".gitignore") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "Bridge/bridge.config.json",
+    "Bridge/pairing.*.json",
+    "Bridge/pairing.*.txt",
+    "Bridge/pairing.*.html",
+    "Bridge/__pycache__/",
+    "*.pyc"
+)) {
+    if (-not $gitignoreText.Contains($needle)) {
+        throw ".gitignore missing Bridge secret/generated ignore rule: $needle"
+    }
+}
+
+$exampleConfigText = Get-Content -LiteralPath (Join-Path $repoRoot "Bridge\bridge.config.example.json") -Raw -Encoding UTF8
+foreach ($needle in @(
+    '"token": ""',
+    '"obsidian_vault"',
+    '"notes_subdir"',
+    '"metadata_timeout_seconds"',
+    '"ai"'
+)) {
+    if (-not $exampleConfigText.Contains($needle)) {
+        throw "Bridge example config missing expected non-secret setting: $needle"
     }
 }
 
@@ -410,8 +453,11 @@ $pairingExportText = Get-Content -LiteralPath (Join-Path $repoRoot "Bridge\expor
 foreach ($needle in @(
     "pairing.iphone.json",
     "pairing.iphone.url.txt",
+    "pairing.iphone.html",
     "sharetoobsidian://pair?bridgeURL=",
     "[System.Uri]::EscapeDataString",
+    "[System.Net.WebUtility]::HtmlEncode",
+    "Open ShareToObsidian pairing link",
     "Set-Clipboard -Value `$PairingURL",
     "Clipboard pairing link:",
     "Token: hidden",
@@ -420,6 +466,19 @@ foreach ($needle in @(
 )) {
     if (-not $pairingExportText.Contains($needle)) {
         throw "iPhone pairing export script missing expected safe export behavior: $needle"
+    }
+}
+
+$pairingWriteText = Get-Content -LiteralPath (Join-Path $repoRoot "Bridge\write_pairing_config.ps1") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "RotateToken",
+    "ShowSecret",
+    "Token: hidden",
+    "if (`$ShowSecret)",
+    "RandomNumberGenerator"
+)) {
+    if (-not $pairingWriteText.Contains($needle)) {
+        throw "Bridge pairing config writer missing safe token behavior: $needle"
     }
 }
 
@@ -434,6 +493,7 @@ foreach ($needle in @(
     ".\ensure_firewall_rule.ps1",
     "pairing.iphone.json",
     "pairing.iphone.url.txt",
+    "pairing.iphone.html",
     "sharetoobsidian://pair?...",
     ".\Scripts\wait_for_iphone_verification.ps1",
     "IPHONE_VERIFICATION_OK",

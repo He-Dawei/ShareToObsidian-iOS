@@ -1,9 +1,10 @@
 param(
     [string]$TaskName = "ShareToObsidianBridge",
-    [string]$ProjectDir = "C:\Users\44527\Documents\Codex\2026-07-24\codex-reconnecting-codex-env-3\outputs\share-to-obsidian-ios\Bridge"
+    [string]$ProjectDir = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
+$ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 $Launcher = Join-Path $ProjectDir "start_bridge.ps1"
 
 $Action = New-ScheduledTaskAction `

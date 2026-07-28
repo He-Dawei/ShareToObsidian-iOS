@@ -50,7 +50,7 @@ DEVELOPMENT_TEAM=你的TeamID VERIFY_DEVICE=1 DEVICE_DESTINATION='platform=iOS,i
 
 ## 真机验收
 
-1. 在 Windows 执行 `Bridge/export_pairing_for_iphone.ps1`，把剪贴板里的 `sharetoobsidian://pair?...` 深链发到自己的 iPhone 并打开。
+1. 在 Windows 执行 `Bridge/export_pairing_for_iphone.ps1`，把剪贴板里的 `sharetoobsidian://pair?...` 深链发到自己的 iPhone 并打开；也可以打开生成的 `pairing.iphone.html`，点击配对按钮。
 2. App 应自动导入 Windows Bridge URL / Token，并显示桥接器在线。
 3. 备用方式：在 App 设置页填入 Windows Bridge URL，或粘贴 `pairing.iphone.json` 到“快速配对”并导入。
 4. 在 Windows 仓库目录运行 `Scripts/wait_for_iphone_verification.ps1`，然后在 App “同步设置”点“发送验收收藏”。
