@@ -14,6 +14,7 @@ final class CaptureListModel {
     var isSyncing = false
     private var syncAgainAfterCurrent = false
     var lastError: String?
+    var lastStatusMessage: String?
     var lastHealth: BridgeHealth?
 
     init() {
@@ -28,6 +29,7 @@ final class CaptureListModel {
 
     func clearLastError() {
         lastError = nil
+        lastStatusMessage = nil
     }
 
     func add(urlText: String) -> Bool {
@@ -41,6 +43,7 @@ final class CaptureListModel {
             item.status = .queued
             try CaptureFileStore.append(item)
             reload()
+            lastStatusMessage = "已加入待同步队列"
             return true
         } catch {
             lastError = error.localizedDescription
@@ -75,6 +78,7 @@ final class CaptureListModel {
             """
             let savedItem = try CaptureFileStore.append(item)
             reload()
+            lastStatusMessage = "已创建验收收藏，正在同步"
             await syncQueued(prioritizedIDs: [savedItem.id])
         } catch {
             lastError = error.localizedDescription
@@ -154,6 +158,7 @@ final class CaptureListModel {
             )
             reload()
             lastError = summary.lastError
+            lastStatusMessage = syncStatusMessage(for: summary)
             isSyncing = false
         } while syncAgainAfterCurrent
     }
@@ -188,6 +193,7 @@ final class CaptureListModel {
             let client = SyncClient(bridgeBaseURL: baseURL, bearerToken: bridgeToken)
             lastHealth = try await client.health()
             lastError = nil
+            lastStatusMessage = "桥接器在线"
         } catch {
             lastHealth = nil
             lastError = error.localizedDescription
@@ -200,6 +206,7 @@ final class CaptureListModel {
             bridgeAddress = CaptureSettingsStore.bridgeAddress
             bridgeToken = CaptureSettingsStore.bridgeToken
             lastError = nil
+            lastStatusMessage = "配对配置已导入"
             await refreshHealth()
         } catch {
             lastError = "配对配置无效：\(error.localizedDescription)"
@@ -212,6 +219,7 @@ final class CaptureListModel {
             bridgeAddress = CaptureSettingsStore.bridgeAddress
             bridgeToken = CaptureSettingsStore.bridgeToken
             lastError = nil
+            lastStatusMessage = "配对链接已导入"
             await refreshHealth()
         } catch {
             lastError = "配对链接无效：\(error.localizedDescription)"
@@ -236,6 +244,7 @@ final class CaptureListModel {
             updated.updatedAt = Date()
             save(updated)
             lastError = nil
+            lastStatusMessage = "已生成新文案，等待同步"
             return updated
         } catch {
             lastError = error.localizedDescription
@@ -257,6 +266,7 @@ final class CaptureListModel {
             updated.updatedAt = Date()
             save(updated)
             lastError = nil
+            lastStatusMessage = "视频信息已刷新，等待同步"
             return updated
         } catch {
             lastError = error.localizedDescription
@@ -311,5 +321,15 @@ final class CaptureListModel {
             return false
         }
         return true
+    }
+
+    private func syncStatusMessage(for summary: CaptureSyncSummary) -> String? {
+        if summary.syncedCount > 0 {
+            return "已同步 \(summary.syncedCount) 条，待同步 \(summary.queuedCount) 条"
+        }
+        if summary.queuedCount > 0 {
+            return "还有 \(summary.queuedCount) 条等待同步"
+        }
+        return "没有待同步内容"
     }
 }

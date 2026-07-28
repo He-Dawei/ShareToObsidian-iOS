@@ -60,6 +60,10 @@ struct SettingsView: View {
                         Text(error)
                             .foregroundStyle(.red)
                     }
+                    if let statusMessage = model.lastStatusMessage {
+                        Text(statusMessage)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("同步设置")

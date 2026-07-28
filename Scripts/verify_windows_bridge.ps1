@@ -450,7 +450,9 @@ foreach ($needle in @(
     'systemImage: "doc.on.clipboard"',
     "await model.importPairing(text: pairingText)",
     $verificationCaptureButtonText,
-    "await model.createVerificationCapture()"
+    "await model.createVerificationCapture()",
+    "model.lastStatusMessage",
+    "statusMessage"
 )) {
     if (-not $settingsViewText.Contains($needle)) {
         throw "SettingsView missing iPhone clipboard pairing import support: $needle"
@@ -729,6 +731,9 @@ foreach ($needle in @(
     "await syncQueued(prioritizedIDs: [savedItem.id])",
     "func syncQueued(prioritizedIDs: [UUID]) async",
     "prioritizedIDs: prioritizedIDs",
+    "var lastStatusMessage: String?",
+    "lastStatusMessage = syncStatusMessage(for: summary)",
+    "private func syncStatusMessage(for summary: CaptureSyncSummary) -> String?",
     "func importPairing(url: URL) async",
     "CaptureSettingsStore.applyPairingURL(url)",
     "return true",
