@@ -92,9 +92,8 @@ struct SyncClient {
         let endpointPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         components?.path = "/" + [basePath, endpointPath].filter { !$0.isEmpty }.joined(separator: "/")
         if !queryItems.isEmpty {
-            var comps = components
-            comps?.queryItems = (comps?.queryItems ?? []) + queryItems
-            components = comps
+            let existing = components?.queryItems ?? []
+            components?.queryItems = existing + queryItems
         }
 
         let url = components?.url ?? bridgeBaseURL.appendingPathComponent(endpointPath)
