@@ -1,11 +1,11 @@
-name: iOS Build — ShareToObsidian
+name: iOS Build → AltStore
 
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -39,10 +39,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Upload App
+      - name: Package as unsigned IPA
+        run: |
+          APP=$(find build/Release-iphoneos -name "*.app" -type d | head -1)
+          echo "App found: $APP"
+          mkdir -p Payload
+          cp -r "$APP" Payload/
+          zip -r ShareToObsidian.ipa Payload
+          ls -lh ShareToObsidian.ipa
+
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ShareToObsidian-iOS
-          path: |
-            build/Release-iphoneos/*.app
-            **/*.app
+          name: ShareToObsidian.ipa
+          path: ShareToObsidian.ipa
