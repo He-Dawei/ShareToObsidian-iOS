@@ -56,6 +56,33 @@ jobs:
           zip -r ShareToObsidian.ipa Payload
           ls -lh ShareToObsidian.ipa
 
+      - name: Verify IPA contents
+        run: |
+          rm -rf ipa-check
+          mkdir ipa-check
+          unzip -q ShareToObsidian.ipa -d ipa-check
+          APP=$(find ipa-check/Payload -maxdepth 1 -name "*.app" -type d -print -quit)
+          if [ -z "$APP" ]; then
+            echo "No app bundle found in IPA Payload"
+            find ipa-check -maxdepth 3 -print
+            exit 1
+          fi
+          EXTENSION="$APP/PlugIns/ShareToObsidianShareExtension.appex"
+          if [ ! -d "$EXTENSION" ]; then
+            echo "Share Extension is missing from IPA: $EXTENSION"
+            find "$APP" -maxdepth 3 -print
+            exit 1
+          fi
+          APP_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          EXTENSION_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$EXTENSION/Info.plist")
+          URL_SCHEME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$APP/Info.plist")
+          EXTENSION_POINT=$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXTENSION/Info.plist")
+          test "$APP_BUNDLE_ID" = "com.hdwei.ShareToObsidian"
+          test "$EXTENSION_BUNDLE_ID" = "com.hdwei.ShareToObsidian.ShareExtension"
+          test "$URL_SCHEME" = "sharetoobsidian"
+          test "$EXTENSION_POINT" = "com.apple.share-services"
+          echo "IPA content verification passed."
+
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
