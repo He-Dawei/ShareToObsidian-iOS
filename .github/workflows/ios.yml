@@ -42,8 +42,15 @@ jobs:
 
       - name: Package as unsigned IPA
         run: |
-          APP=$(find /tmp/xcode-build -name "*.app" -type d | grep -v "\.appex" | head -1)
+          PRODUCT_DIR=/tmp/xcode-build/Build/Products/Release-iphoneos
+          APP=$(find "$PRODUCT_DIR" -maxdepth 1 -name "*.app" -type d -print -quit)
+          if [ -z "$APP" ]; then
+            echo "No .app found under $PRODUCT_DIR"
+            find /tmp/xcode-build/Build/Products -maxdepth 3 -print
+            exit 1
+          fi
           echo "App found: $APP"
+          rm -rf Payload ShareToObsidian.ipa
           mkdir -p Payload
           cp -r "$APP" Payload/
           zip -r ShareToObsidian.ipa Payload
