@@ -103,6 +103,15 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\verify_windows_bridge.ps1
 
 该脚本会检查旧定时任务已取消、新 Bridge 任务正在运行、认证生效、fast 入库/删除链路可用，并做 iOS 项目静态结构检查。
 
+iPhone 真机同步验收：
+
+```powershell
+cd C:\Users\44527\ios-project
+powershell -ExecutionPolicy Bypass -File .\Scripts\wait_for_iphone_verification.ps1
+```
+
+脚本开始等待后，在 iPhone App 的“同步设置”点“发送验收收藏”。电脑端看到 `IPHONE_VERIFICATION_OK` 即表示 iPhone 已通过 Windows Bridge 写入 Obsidian。
+
 生成手机配对配置：
 
 ```powershell

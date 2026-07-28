@@ -309,6 +309,7 @@ $requiredFiles = @(
     "Bridge\ensure_firewall_rule.ps1",
     "Bridge\export_pairing_for_iphone.ps1",
     "Scripts\export_mac_build_package.ps1",
+    "Scripts\wait_for_iphone_verification.ps1",
     "ShareExtension\Info.plist",
     "ShareExtension\ShareExtension.entitlements",
     "Shared\CaptureItem.swift",
@@ -434,11 +435,29 @@ foreach ($needle in @(
     "pairing.iphone.json",
     "pairing.iphone.url.txt",
     "sharetoobsidian://pair?...",
+    ".\Scripts\wait_for_iphone_verification.ps1",
+    "IPHONE_VERIFICATION_OK",
     $quickPairingText,
     $doNotShareText
 )) {
     if (-not $readmeText.Contains($needle)) {
         throw "README missing iPhone pairing instructions: $needle"
+    }
+}
+
+$waitForIPhoneVerificationText = Get-Content -LiteralPath (Join-Path $repoRoot "Scripts\wait_for_iphone_verification.ps1") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "ShareToObsidianBridge",
+    "/health",
+    "https://example.com/share-to-obsidian-ios-verify",
+    "IPHONE_VERIFICATION_OK",
+    "IPHONE_VERIFICATION_TIMEOUT",
+    "10_Notes",
+    "inbox_subdir",
+    "TimeoutSeconds"
+)) {
+    if (-not $waitForIPhoneVerificationText.Contains($needle)) {
+        throw "wait_for_iphone_verification.ps1 missing expected device verification behavior: $needle"
     }
 }
 
