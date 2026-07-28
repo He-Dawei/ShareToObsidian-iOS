@@ -12,6 +12,7 @@ chmod +x Scripts/verify_mac_ios_project.sh
 
 - App 与 Share Extension 都启用同一个 App Group。
 - App 声明 Background fetch 与 BGTask identifier。
+- App 注册 `sharetoobsidian://pair` 配对 URL Scheme。
 - App 与 Share Extension 都声明 Local Network 权限说明。
 - Share Extension 类型为 `com.apple.share-services`。
 - XcodeGen 能生成工程。
@@ -49,9 +50,9 @@ DEVELOPMENT_TEAM=你的TeamID VERIFY_DEVICE=1 DEVICE_DESTINATION='platform=iOS,i
 
 ## 真机验收
 
-1. 在 App 设置页填入 Windows Bridge URL：`http://电脑局域网IP:8765`。
-2. 或在 Windows 执行 `Bridge/write_pairing_config.ps1`，把 `pairing.local.json` 内容粘贴到 App 设置页“快速配对”并导入。
-3. 点“检查连接”，应显示桥接器在线。
+1. 在 Windows 执行 `Bridge/export_pairing_for_iphone.ps1`，把剪贴板里的 `sharetoobsidian://pair?...` 深链发到自己的 iPhone 并打开。
+2. App 应自动导入 Windows Bridge URL / Token，并显示桥接器在线。
+3. 备用方式：在 App 设置页填入 Windows Bridge URL，或粘贴 `pairing.iphone.json` 到“快速配对”并导入。
 4. 从抖音/B站/网页分享链接到 `ShareToObsidian`。
 5. 如果 Windows Bridge 在线，分享扩展应直接用 fast 模式尝试同步；Obsidian 可在不手动打开 App 的情况下出现新笔记。
 6. 回到 App，列表应出现新收藏，并显示同步状态。

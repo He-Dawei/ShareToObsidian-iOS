@@ -56,6 +56,12 @@ if [[ "$APP_BG_IDENTIFIER" != "com.hdwei.ShareToObsidian.sync" ]]; then
   exit 1
 fi
 
+APP_URL_SCHEME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' App/Info.plist)"
+if [[ "$APP_URL_SCHEME" != "sharetoobsidian" ]]; then
+  echo "App Info.plist has unexpected pairing URL scheme: $APP_URL_SCHEME" >&2
+  exit 1
+fi
+
 APP_LOCAL_NETWORK_TEXT="$(/usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' App/Info.plist)"
 EXT_LOCAL_NETWORK_TEXT="$(/usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' ShareExtension/Info.plist)"
 if [[ -z "$APP_LOCAL_NETWORK_TEXT" || -z "$EXT_LOCAL_NETWORK_TEXT" ]]; then
@@ -107,6 +113,12 @@ fi
 BUILT_APP_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_BUNDLE/Info.plist")"
 if [[ "$BUILT_APP_BUNDLE_ID" != "$APP_BUNDLE_ID" ]]; then
   echo "Unexpected app bundle id: $BUILT_APP_BUNDLE_ID" >&2
+  exit 1
+fi
+
+BUILT_APP_URL_SCHEME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$APP_BUNDLE/Info.plist")"
+if [[ "$BUILT_APP_URL_SCHEME" != "sharetoobsidian" ]]; then
+  echo "Built app has unexpected pairing URL scheme: $BUILT_APP_URL_SCHEME" >&2
   exit 1
 fi
 

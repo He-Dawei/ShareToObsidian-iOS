@@ -1,6 +1,7 @@
 param(
     [string]$ConfigPath = ".\bridge.config.json",
     [string]$OutputPath = ".\pairing.iphone.json",
+    [string]$OutputURLPath = ".\pairing.iphone.url.txt",
     [switch]$ShowSecret
 )
 
@@ -36,14 +37,17 @@ $Pairing = [ordered]@{
 }
 
 $Json = $Pairing | ConvertTo-Json -Depth 4
+$PairingURL = "sharetoobsidian://pair?bridgeURL=$([System.Uri]::EscapeDataString($BridgeURL))&token=$([System.Uri]::EscapeDataString([string]$Config.token))"
 $OutputFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
+$OutputURLFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputURLPath)
 [System.IO.File]::WriteAllText($OutputFullPath, $Json, $Utf8NoBom)
+[System.IO.File]::WriteAllText($OutputURLFullPath, $PairingURL, $Utf8NoBom)
 
 $VaultPairingPath = Join-Path (Join-Path $Config.obsidian_vault $Config.notes_subdir) "pairing.iphone.json"
 [System.IO.File]::WriteAllText($VaultPairingPath, $Json, $Utf8NoBom)
 
 try {
-    Set-Clipboard -Value $Json
+    Set-Clipboard -Value $PairingURL
     $ClipboardStatus = "copied"
 } catch {
     $ClipboardStatus = "failed: $($_.Exception.Message)"
@@ -51,12 +55,15 @@ try {
 
 Write-Host "Wrote iPhone pairing config:"
 Write-Host $OutputFullPath
+Write-Host $OutputURLFullPath
 Write-Host $VaultPairingPath
 Write-Host "Bridge URL: $BridgeURL"
-Write-Host "Clipboard: $ClipboardStatus"
+Write-Host "Clipboard pairing link: $ClipboardStatus"
 Write-Host "Token: hidden. Use -ShowSecret only if you need to inspect the JSON."
 
 if ($ShowSecret) {
     Write-Host ""
     Write-Host $Json
+    Write-Host ""
+    Write-Host $PairingURL
 }

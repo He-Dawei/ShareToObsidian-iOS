@@ -95,6 +95,12 @@ struct ContentView: View {
         .task {
             await model.runForegroundSyncLoop()
         }
+        .onOpenURL { url in
+            Task {
+                await model.importPairing(url: url)
+                await model.syncIfPossible()
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:

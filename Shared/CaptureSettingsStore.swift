@@ -34,9 +34,7 @@ enum CaptureSettingsStore {
         let cleaned = text
             .replacingOccurrences(of: "\u{feff}", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let url = URL(string: cleaned),
-           ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-           url.host != nil {
+        if isValidBridgeAddress(cleaned) {
             bridgeAddress = cleaned
             bridgeToken = ""
             return BridgePairingConfig(bridgeURL: cleaned, bridgeAddress: nil, token: nil, notesRoot: nil, createdAt: nil)
@@ -45,12 +43,54 @@ enum CaptureSettingsStore {
         let data = Data(cleaned.utf8)
         let config = try JSONDecoder().decode(BridgePairingConfig.self, from: data)
         guard let address = config.resolvedBridgeAddress?.trimmingCharacters(in: .whitespacesAndNewlines),
-              URL(string: address) != nil else {
+              isValidBridgeAddress(address) else {
             throw URLError(.badURL)
         }
         bridgeAddress = address
         bridgeToken = config.token ?? ""
         return config
+    }
+
+    static func applyPairingURL(_ url: URL) throws -> BridgePairingConfig {
+        guard url.scheme?.lowercased() == "sharetoobsidian",
+              url.host?.lowercased() == "pair",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
+
+        let queryItems = Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+                item.value.map { (item.name, $0) }
+            }
+        )
+
+        if let configText = queryItems["config"], !configText.isEmpty {
+            return try applyPairingText(configText)
+        }
+
+        guard let address = queryItems["bridgeURL"] ?? queryItems["bridgeAddress"] ?? queryItems["url"],
+              isValidBridgeAddress(address) else {
+            throw URLError(.badURL)
+        }
+
+        bridgeAddress = address
+        bridgeToken = queryItems["token"] ?? ""
+        return BridgePairingConfig(
+            bridgeURL: address,
+            bridgeAddress: nil,
+            token: queryItems["token"],
+            notesRoot: nil,
+            createdAt: nil
+        )
+    }
+
+    private static func isValidBridgeAddress(_ value: String) -> Bool {
+        guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil else {
+            return false
+        }
+        return true
     }
 
     private static func migrateLegacySettingsIfNeeded() {

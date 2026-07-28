@@ -4,6 +4,17 @@
 <dict>
     <key>CFBundleDisplayName</key>
     <string>ShareToObsidian</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.hdwei.ShareToObsidian.pairing</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>sharetoobsidian</string>
+            </array>
+        </dict>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIBackgroundModes</key>

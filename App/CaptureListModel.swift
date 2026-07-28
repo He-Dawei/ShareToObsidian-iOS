@@ -168,6 +168,18 @@ final class CaptureListModel {
         }
     }
 
+    func importPairing(url: URL) async {
+        do {
+            _ = try CaptureSettingsStore.applyPairingURL(url)
+            bridgeAddress = CaptureSettingsStore.bridgeAddress
+            bridgeToken = CaptureSettingsStore.bridgeToken
+            lastError = nil
+            await refreshHealth()
+        } catch {
+            lastError = "配对链接无效：\(error.localizedDescription)"
+        }
+    }
+
     func regenerateDrafts(for item: CaptureItem) async -> CaptureItem {
         guard let baseURL = URL(string: bridgeAddress) else {
             lastError = "电脑桥接地址无效"

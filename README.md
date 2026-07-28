@@ -23,7 +23,7 @@
 - App 启动和回到前台时自动检查桥接器并补同步待处理队列
 - App 进入后台时注册 iOS Background App Refresh，同步失败队列会在系统允许的后台唤醒中继续重试
 - App 支持保存 Bridge URL / Token，并可手动检查连接
-- Windows 可生成 `pairing.local.json`，App 设置页可粘贴导入，避免手填局域网 IP
+- Windows 可生成 `sharetoobsidian://pair?...` 深链和 `pairing.iphone.json`，App 可点链接或粘贴导入，避免手填局域网 IP
 - App 详情页可调用 Bridge `/metadata` 刷新视频信息，并展示作者、简介、时长、播放/点赞、封面链接
 - App 可调用桥接器 `/drafts` 重新生成 3 种 Obsidian 文案版本
 - Share Extension 保存分享后会用 fast 模式立即尝试同步最多 3 条待处理队列；fast 模式跳过耗时元数据提取，电脑不在线时保留队列，之后由 App 补同步
@@ -113,12 +113,15 @@ cd C:\Users\44527\Documents\Codex\2026-07-24\codex-reconnecting-codex-env-3\outp
 
 ```text
 Bridge\pairing.iphone.json
+Bridge\pairing.iphone.url.txt
 E:\44527\Documents\claude仓库\移动收藏\pairing.iphone.json
 ```
 
-它还会把配对 JSON 复制到 Windows 剪贴板。iPhone App 打开“同步设置”，粘贴到“快速配对”，点“导入配对配置”，再点“检查连接”。
+它还会把 `sharetoobsidian://pair?...` 配对深链复制到 Windows 剪贴板。把这个链接发到自己的 iPhone 并打开，App 会自动导入 Bridge URL / Token 并检查连接。
 
-`pairing.iphone.json` 包含 Bridge Token，只粘贴到自己的 iPhone App，不要公开分享。需要更换 token 时：
+如果不方便打开深链，也可以把 `pairing.iphone.json` 粘贴到 iPhone App 的“同步设置”→“快速配对”，点“导入配对配置”，再点“检查连接”。
+
+`pairing.iphone.json` 和 `pairing.iphone.url.txt` 都包含 Bridge Token，只发给自己的 iPhone，不要公开分享。需要更换 token 时：
 
 ```powershell
 .\write_pairing_config.ps1 -RotateToken

@@ -362,6 +362,8 @@ foreach ($needle in @(
     "Print :com.apple.security.application-groups:0",
     "Print :UIBackgroundModes:0",
     "Print :BGTaskSchedulerPermittedIdentifiers:0",
+    "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0",
+    "sharetoobsidian",
     "NSLocalNetworkUsageDescription",
     "Print :NSExtension:NSExtensionPointIdentifier",
     "VERIFY_DEVICE",
@@ -406,7 +408,11 @@ foreach ($needle in @(
 $pairingExportText = Get-Content -LiteralPath (Join-Path $repoRoot "Bridge\export_pairing_for_iphone.ps1") -Raw -Encoding UTF8
 foreach ($needle in @(
     "pairing.iphone.json",
-    "Set-Clipboard -Value `$Json",
+    "pairing.iphone.url.txt",
+    "sharetoobsidian://pair?bridgeURL=",
+    "[System.Uri]::EscapeDataString",
+    "Set-Clipboard -Value `$PairingURL",
+    "Clipboard pairing link:",
     "Token: hidden",
     "ShowSecret",
     "Bridge URL:"
@@ -426,6 +432,8 @@ foreach ($needle in @(
     ".\export_pairing_for_iphone.ps1",
     ".\ensure_firewall_rule.ps1",
     "pairing.iphone.json",
+    "pairing.iphone.url.txt",
+    "sharetoobsidian://pair?...",
     $quickPairingText,
     $doNotShareText
 )) {
@@ -449,6 +457,10 @@ foreach ($needle in @(
 $captureSettingsStoreText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\CaptureSettingsStore.swift") -Raw -Encoding UTF8
 foreach ($needle in @(
     "applyPairingText",
+    "applyPairingURL",
+    "sharetoobsidian",
+    "URLComponents(url: url",
+    "queryItems",
     '["http", "https"].contains',
     "url.host != nil",
     "bridgeToken = `"`"",
@@ -469,7 +481,7 @@ foreach ($text in @($appEntitlements, $extensionEntitlements)) {
 
 $extensionPlist = Get-Content -LiteralPath (Join-Path $repoRoot "ShareExtension\Info.plist") -Raw -Encoding UTF8
 $appPlist = Get-Content -LiteralPath (Join-Path $repoRoot "App\Info.plist") -Raw -Encoding UTF8
-foreach ($needle in @("NSAppTransportSecurity", "NSLocalNetworkUsageDescription", "UIBackgroundModes", "BGTaskSchedulerPermittedIdentifiers", "com.hdwei.ShareToObsidian.sync")) {
+foreach ($needle in @("NSAppTransportSecurity", "NSLocalNetworkUsageDescription", "UIBackgroundModes", "BGTaskSchedulerPermittedIdentifiers", "com.hdwei.ShareToObsidian.sync", "CFBundleURLTypes", "CFBundleURLSchemes", "sharetoobsidian")) {
     if (-not $appPlist.Contains($needle)) {
         throw "App Info.plist missing expected network permission value: $needle"
     }
@@ -709,6 +721,8 @@ foreach ($needle in @(
     "clearLastError",
     "func add(urlText: String) -> Bool",
     "SupportedShareURL.isSupported(url)",
+    "func importPairing(url: URL) async",
+    "CaptureSettingsStore.applyPairingURL(url)",
     "return true",
     "return false",
     "var item = CaptureItem(url: url)",
@@ -757,6 +771,18 @@ if (-not [regex]::IsMatch($captureListModelText, $metadataQueuedPattern)) {
     throw "CaptureListModel must queue refreshed metadata before saving."
 }
 
+$supportedShareURLText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\SupportedShareURL.swift") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "enum SupportedShareURL",
+    "static func isSupported(_ url: URL) -> Bool",
+    '["http", "https"].contains(scheme)',
+    "url.host != nil"
+)) {
+    if (-not $supportedShareURLText.Contains($needle)) {
+        throw "SupportedShareURL must restrict intake to absolute web URLs: $needle"
+    }
+}
+
 $contentViewText = Get-Content -LiteralPath (Join-Path $repoRoot "App\ContentView.swift") -Raw -Encoding UTF8
 foreach ($needle in @(
     "model.lastError",
@@ -766,6 +792,8 @@ foreach ($needle in @(
     "model.save(updated)",
     "let updated = await model.regenerateDrafts(for: item)",
     "let updated = await model.refreshMetadata(for: item)",
+    ".onOpenURL { url in",
+    "await model.importPairing(url: url)",
     "searchText",
     "visibleItems",
     "searchableText(for: item)",
@@ -857,6 +885,7 @@ foreach ($needle in @(
     "extractPropertyListContent",
     "urls(in: text)",
     "matches(in: text, range: range)",
+    "filter { SupportedShareURL.isSupported(`$0) }",
     "capturedURLs.append(contentsOf: urls)",
     "var savedIDs: [UUID] = []",
     "var item = CaptureItem(url: url, title: title, sourceApp: `"Share Extension`")",
@@ -869,6 +898,7 @@ foreach ($needle in @(
     "prioritizedIDs: prioritizedIDs",
     "let uniqueURLs = Self.uniqueURLs(capturedURLs)",
     "for (index, url) in uniqueURLs.enumerated()",
+    "guard SupportedShareURL.isSupported(url) else",
     "capturedTitles.indices.contains(index)",
     "cleanTitle",
     "uniqueURLs",
