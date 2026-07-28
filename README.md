@@ -122,6 +122,24 @@ https://example.com/share-to-obsidian-share-extension-verify
 
 点系统分享按钮，选择 `Save to Obsidian`。Windows 端出现 `SHARE_EXTENSION_VERIFICATION_OK` 即表示分享扩展链路已通过。
 
+## SideStore 安装 standalone
+
+当前 Windows 路线：
+
+1. Codex 改代码并推送到 GitHub。
+2. GitHub Actions 的 macOS runner 构建 `ShareToObsidian-standalone.ipa`。
+3. 下载 latest standalone：
+
+```powershell
+cd C:\Users\44527\ios-project
+powershell -ExecutionPolicy Bypass -File .\Scripts\download_latest_standalone.ps1
+```
+
+4. 把 `E:\claude code生成文件\ShareToObsidian-standalone-latest.ipa` 传到 iPhone。
+5. 用 SideStore 安装。免费签名 7 天有效，iPhone 和电脑同 WiFi 时由 SideStore 自动续签。
+
+说明：Windows 不支持 AirDrop。可用 iCloud Drive、微信文件传输、LocalSend、数据线文件共享等方式把 IPA 传到 iPhone。standalone 版本不包含系统分享扩展，只用于主 App 内粘贴链接/同步验收。
+
 默认 Obsidian 输出目录：
 
 `E:\44527\Documents\claude仓库\移动收藏`
