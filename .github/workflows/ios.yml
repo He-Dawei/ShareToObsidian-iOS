@@ -58,6 +58,10 @@ jobs:
 
       - name: Verify IPA contents
         run: |
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
           rm -rf ipa-check
           mkdir ipa-check
           unzip -q ShareToObsidian.ipa -d ipa-check
@@ -65,22 +69,22 @@ jobs:
           if [ -z "$APP" ]; then
             echo "No app bundle found in IPA Payload"
             find ipa-check -maxdepth 3 -print
-            exit 1
+            fail "No app bundle found in IPA Payload"
           fi
-          EXTENSION="$APP/PlugIns/ShareToObsidianShareExtension.appex"
-          if [ ! -d "$EXTENSION" ]; then
-            echo "Share Extension is missing from IPA: $EXTENSION"
+          EXTENSION=$(find "$APP/PlugIns" -maxdepth 1 -name "*.appex" -type d -print -quit 2>/dev/null || true)
+          if [ -z "$EXTENSION" ]; then
+            echo "Share Extension is missing from IPA."
             find "$APP" -maxdepth 3 -print
-            exit 1
+            fail "Share Extension is missing from IPA."
           fi
-          APP_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
-          EXTENSION_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$EXTENSION/Info.plist")
-          URL_SCHEME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$APP/Info.plist")
-          EXTENSION_POINT=$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXTENSION/Info.plist")
-          test "$APP_BUNDLE_ID" = "com.hdwei.ShareToObsidian"
-          test "$EXTENSION_BUNDLE_ID" = "com.hdwei.ShareToObsidian.ShareExtension"
-          test "$URL_SCHEME" = "sharetoobsidian"
-          test "$EXTENSION_POINT" = "com.apple.share-services"
+          APP_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist") || fail "Cannot read app bundle id."
+          EXTENSION_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$EXTENSION/Info.plist") || fail "Cannot read extension bundle id."
+          URL_SCHEME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$APP/Info.plist") || fail "Cannot read app pairing URL scheme."
+          EXTENSION_POINT=$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXTENSION/Info.plist") || fail "Cannot read extension point."
+          [ "$APP_BUNDLE_ID" = "com.hdwei.ShareToObsidian" ] || fail "Unexpected app bundle id: $APP_BUNDLE_ID"
+          [ "$EXTENSION_BUNDLE_ID" = "com.hdwei.ShareToObsidian.ShareExtension" ] || fail "Unexpected extension bundle id: $EXTENSION_BUNDLE_ID"
+          [ "$URL_SCHEME" = "sharetoobsidian" ] || fail "Unexpected app pairing URL scheme: $URL_SCHEME"
+          [ "$EXTENSION_POINT" = "com.apple.share-services" ] || fail "Unexpected extension point: $EXTENSION_POINT"
           echo "IPA content verification passed."
 
       - name: Upload IPA
