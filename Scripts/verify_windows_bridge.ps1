@@ -481,12 +481,12 @@ foreach ($text in @($appEntitlements, $extensionEntitlements)) {
 
 $extensionPlist = Get-Content -LiteralPath (Join-Path $repoRoot "ShareExtension\Info.plist") -Raw -Encoding UTF8
 $appPlist = Get-Content -LiteralPath (Join-Path $repoRoot "App\Info.plist") -Raw -Encoding UTF8
-foreach ($needle in @("NSAppTransportSecurity", "NSLocalNetworkUsageDescription", "UIBackgroundModes", "BGTaskSchedulerPermittedIdentifiers", "com.hdwei.ShareToObsidian.sync", "CFBundleURLTypes", "CFBundleURLSchemes", "sharetoobsidian")) {
+foreach ($needle in @("CFBundleExecutable", "CFBundleIdentifier", '$(PRODUCT_BUNDLE_IDENTIFIER)', "CFBundlePackageType", "APPL", "CFBundleShortVersionString", "CFBundleVersion", "NSAppTransportSecurity", "NSLocalNetworkUsageDescription", "UIBackgroundModes", "BGTaskSchedulerPermittedIdentifiers", "com.hdwei.ShareToObsidian.sync", "CFBundleURLTypes", "CFBundleURLSchemes", "sharetoobsidian")) {
     if (-not $appPlist.Contains($needle)) {
         throw "App Info.plist missing expected network permission value: $needle"
     }
 }
-foreach ($needle in @("NSAppTransportSecurity", "NSLocalNetworkUsageDescription", "NSExtensionActivationSupportsWebURLWithMaxCount", "NSExtensionActivationSupportsWebPageWithMaxCount", "NSExtensionActivationSupportsText")) {
+foreach ($needle in @("CFBundleExecutable", "CFBundleIdentifier", '$(PRODUCT_BUNDLE_IDENTIFIER)', "CFBundlePackageType", "XPC!", "CFBundleShortVersionString", "CFBundleVersion", "NSAppTransportSecurity", "NSLocalNetworkUsageDescription", "NSExtensionActivationSupportsWebURLWithMaxCount", "NSExtensionActivationSupportsWebPageWithMaxCount", "NSExtensionActivationSupportsText")) {
     if ($extensionPlist -notlike "*$needle*") {
         throw "ShareExtension Info.plist missing expected value: $needle"
     }
