@@ -15,27 +15,7 @@ targets:
     sources:
       - App
       - Shared
-    entitlements:
-      path: App/ShareToObsidian.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hdwei.ShareToObsidian
         INFOPLIST_FILE: App/Info.plist
-    dependencies:
-      - target: ShareToObsidianShareExtension
-        embed: true
-        codeSign: true
-  ShareToObsidianShareExtension:
-    type: app-extension
-    platform: iOS
-    sources:
-      - ShareExtension
-      - Shared
-    entitlements:
-      path: ShareExtension/ShareExtension.entitlements
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.hdwei.ShareToObsidian.ShareExtension
-        INFOPLIST_FILE: ShareExtension/Info.plist
-        APPLICATION_EXTENSION_API_ONLY: YES
-        SKIP_INSTALL: YES
