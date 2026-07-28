@@ -443,11 +443,14 @@ foreach ($needle in @(
 }
 
 $settingsViewText = Get-Content -LiteralPath (Join-Path $repoRoot "App\SettingsView.swift") -Raw -Encoding UTF8
+$verificationCaptureButtonText = New-TextFromCodePoints @(21457,36865,39564,25910,25910,34255)
 foreach ($needle in @(
     "import UIKit",
     "UIPasteboard.general.string",
     'systemImage: "doc.on.clipboard"',
-    "await model.importPairing(text: pairingText)"
+    "await model.importPairing(text: pairingText)",
+    $verificationCaptureButtonText,
+    "await model.createVerificationCapture()"
 )) {
     if (-not $settingsViewText.Contains($needle)) {
         throw "SettingsView missing iPhone clipboard pairing import support: $needle"
@@ -721,6 +724,11 @@ foreach ($needle in @(
     "clearLastError",
     "func add(urlText: String) -> Bool",
     "SupportedShareURL.isSupported(url)",
+    "func createVerificationCapture() async",
+    "https://example.com/share-to-obsidian-ios-verify",
+    "await syncQueued(prioritizedIDs: [savedItem.id])",
+    "func syncQueued(prioritizedIDs: [UUID]) async",
+    "prioritizedIDs: prioritizedIDs",
     "func importPairing(url: URL) async",
     "CaptureSettingsStore.applyPairingURL(url)",
     "return true",

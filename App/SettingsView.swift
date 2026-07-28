@@ -20,6 +20,9 @@ struct SettingsView: View {
                     Button("同步所有待处理") {
                         Task { await model.syncQueued() }
                     }
+                    Button("发送验收收藏") {
+                        Task { await model.createVerificationCapture() }
+                    }
                 }
 
                 Section("快速配对") {

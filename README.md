@@ -24,6 +24,7 @@
 - App 进入后台时注册 iOS Background App Refresh，同步失败队列会在系统允许的后台唤醒中继续重试
 - App 支持保存 Bridge URL / Token，并可手动检查连接
 - Windows 可生成 `sharetoobsidian://pair?...` 深链和 `pairing.iphone.json`，App 可点链接或粘贴导入，避免手填局域网 IP
+- App 设置页可发送一条固定验收收藏，用于验证 iPhone 到 Windows Obsidian Bridge 的同步链路
 - App 详情页可调用 Bridge `/metadata` 刷新视频信息，并展示作者、简介、时长、播放/点赞、封面链接
 - App 可调用桥接器 `/drafts` 重新生成 3 种 Obsidian 文案版本
 - Share Extension 保存分享后会用 fast 模式立即尝试同步最多 3 条待处理队列；fast 模式跳过耗时元数据提取，电脑不在线时保留队列，之后由 App 补同步

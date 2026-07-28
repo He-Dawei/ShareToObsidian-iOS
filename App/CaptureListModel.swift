@@ -48,6 +48,39 @@ final class CaptureListModel {
         }
     }
 
+    func createVerificationCapture() async {
+        guard let url = URL(string: "https://example.com/share-to-obsidian-ios-verify"),
+              SupportedShareURL.isSupported(url) else {
+            lastError = "验收链接格式不正确"
+            return
+        }
+        do {
+            var item = CaptureItem(url: url, title: "ShareToObsidian iPhone 验收", sourceApp: "ShareToObsidian")
+            item.summary = "用于验证 iPhone App 到 Windows Obsidian Bridge 的实时同步链路。"
+            item.tags = ["iPhone验收", "ShareToObsidian"]
+            item.status = .queued
+            item.draftMarkdown = """
+            # ShareToObsidian iPhone 验收
+
+            ## 核心内容
+            这是一条从 iPhone App 主程序发起的验收收藏，用于确认 App 可以把队列内容同步到 Windows Obsidian Bridge。
+
+            ## 验收点
+            - App 可以创建收藏
+            - App 可以连接电脑桥接器
+            - Obsidian `移动收藏` 文件夹可以收到笔记
+
+            ## 原始链接
+            https://example.com/share-to-obsidian-ios-verify
+            """
+            let savedItem = try CaptureFileStore.append(item)
+            reload()
+            await syncQueued(prioritizedIDs: [savedItem.id])
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     func save(_ item: CaptureItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else {
             return
@@ -100,6 +133,10 @@ final class CaptureListModel {
     }
 
     func syncQueued() async {
+        await syncQueued(prioritizedIDs: [])
+    }
+
+    func syncQueued(prioritizedIDs: [UUID]) async {
         if isSyncing {
             syncAgainAfterCurrent = true
             return
@@ -112,7 +149,8 @@ final class CaptureListModel {
             let summary = await CaptureSyncRunner.syncQueued(
                 bridgeAddress: bridgeAddress,
                 bearerToken: bridgeToken,
-                enrichSyncedMissingMetadata: true
+                enrichSyncedMissingMetadata: true,
+                prioritizedIDs: prioritizedIDs
             )
             reload()
             lastError = summary.lastError
