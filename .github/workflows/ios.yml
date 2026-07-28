@@ -51,13 +51,17 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate standalone project (no extension)
-        run: xcodegen generate --spec project-standalone.yml --project ShareToObsidian-standalone.xcodeproj
+        run: |
+          mkdir -p /tmp/standalone-project
+          cd /tmp/standalone-project
+          cp "$GITHUB_WORKSPACE/project-standalone.yml" .
+          xcodegen generate --spec project-standalone.yml
       - name: Clean Derived Data
         run: rm -rf ~/Library/Developer/Xcode/DerivedData
       - name: Build standalone (no extension)
         run: |
           xcodebuild clean build \
-            -project ShareToObsidian-standalone.xcodeproj \
+            -project /tmp/standalone-project/ShareToObsidian.xcodeproj \
             -scheme ShareToObsidian \
             -sdk iphoneos \
             -configuration Release \
