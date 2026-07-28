@@ -80,6 +80,24 @@ cd .\Bridge
 .\export_pairing_for_iphone.ps1
 ```
 
+## 当前手机配对方式
+
+Windows Bridge 运行后，iPhone 和电脑在同一局域网时，直接在 iPhone Safari 打开：
+
+```text
+http://192.168.1.104:8765/pair
+```
+
+页面会显示 ShareToObsidian 配对按钮。点击后 App 会导入 Bridge URL 和 Token。
+如果电脑 IP 变化，先在 Windows 执行：
+
+```powershell
+cd C:\Users\44527\ios-project\Bridge
+.\export_pairing_for_iphone.ps1
+```
+
+然后用输出的 `Bridge URL`，把末尾改成 `/pair`。该页面包含 Bridge Token，只在自己的 iPhone 上打开。
+
 默认 Obsidian 输出目录：
 
 `E:\44527\Documents\claude仓库\移动收藏`

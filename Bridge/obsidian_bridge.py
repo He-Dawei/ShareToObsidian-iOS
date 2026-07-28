@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import datetime as dt
+from html import escape as html_escape
+from ipaddress import ip_address
 import json
 import os
 import re
@@ -12,7 +14,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 
 def main() -> int:
@@ -51,6 +53,12 @@ def handler_factory(config: dict):
                     self.write_error_json(403, "PAIRING_FORBIDDEN", "Pairing is only available from the local computer.")
                     return
                 self.write_json(pairing_payload(config))
+                return
+            if path in {"/pair", "/pairing.html"}:
+                if not is_lan_client(self.client_address[0]):
+                    self.write_error_json(403, "PAIRING_FORBIDDEN", "Pairing is only available from the local network.")
+                    return
+                self.write_html(pairing_html(config))
                 return
             self.write_error_json(404, "NOT_FOUND", f"Unknown endpoint: {path}")
 
@@ -106,6 +114,14 @@ def handler_factory(config: dict):
             self.end_headers()
             self.wfile.write(data)
 
+        def write_html(self, value: str) -> None:
+            data = value.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
         def write_error_json(self, status: int, code: str, message: str) -> None:
             data = json.dumps(
                 {
@@ -136,6 +152,14 @@ def is_local_client(address: str) -> bool:
     return address in {"127.0.0.1", "::1", "localhost"}
 
 
+def is_lan_client(address: str) -> bool:
+    try:
+        parsed = ip_address(address)
+    except ValueError:
+        return False
+    return parsed.is_loopback or parsed.is_private or parsed.is_link_local
+
+
 def pairing_payload(config: dict) -> dict:
     host = str(config.get("public_host") or local_ipv4() or "127.0.0.1")
     port = int(config.get("port", 8765))
@@ -145,6 +169,47 @@ def pairing_payload(config: dict) -> dict:
         "notesRoot": str(notes_root(config)),
         "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
+
+
+def pairing_url(config: dict) -> str:
+    payload = pairing_payload(config)
+    return (
+        "sharetoobsidian://pair"
+        f"?bridgeURL={quote(str(payload['bridgeURL']), safe='')}"
+        f"&token={quote(str(payload.get('token', '')), safe='')}"
+    )
+
+
+def pairing_html(config: dict) -> str:
+    payload = pairing_payload(config)
+    bridge_url = html_escape(str(payload["bridgeURL"]))
+    deep_link = html_escape(pairing_url(config))
+    fallback_json = html_escape(json.dumps(payload, ensure_ascii=False, indent=2))
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShareToObsidian 配对</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; line-height: 1.45; }}
+    a.button {{ display: inline-block; padding: 12px 16px; background: #0a7cff; color: white; border-radius: 8px; text-decoration: none; font-weight: 600; }}
+    code, pre {{ background: #f3f4f6; border-radius: 6px; }}
+    pre {{ padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }}
+    .warning {{ color: #9a3412; font-weight: 600; }}
+  </style>
+</head>
+<body>
+  <h1>ShareToObsidian 配对</h1>
+  <p>Bridge URL: <code>{bridge_url}</code></p>
+  <p><a class="button" href="{deep_link}">打开 App 并导入配对</a></p>
+  <p class="warning">此页面包含 Bridge Token。只在你自己的局域网和 iPhone 上打开。</p>
+  <h2>备用 JSON</h2>
+  <p>如果按钮无法打开 App，把下面 JSON 复制到 App 的“同步设置 -> 快速配对”。</p>
+  <pre>{fallback_json}</pre>
+</body>
+</html>
+"""
 
 
 def local_ipv4() -> str:

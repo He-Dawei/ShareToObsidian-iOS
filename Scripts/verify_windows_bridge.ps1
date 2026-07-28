@@ -167,6 +167,15 @@ if (-not $health.queueWritable) {
 }
 Write-Host "Health check passed."
 
+$pairingPage = Invoke-WebRequest -Method "GET" -Uri "$BaseUrl/pair" -TimeoutSec 15 -UseBasicParsing
+if ($pairingPage.StatusCode -ne 200 -or
+    $pairingPage.Headers["Content-Type"] -notlike "text/html*" -or
+    [string]$pairingPage.Content -notlike "*sharetoobsidian://pair*" -or
+    [string]$pairingPage.Content -notlike "*Bridge URL*") {
+    throw "Bridge pairing page did not return the expected HTML deep link."
+}
+Write-Host "Pairing page check passed."
+
 $statusWithoutAuth = Get-StatusCode {
     Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/metadata" -Body @{ url = "https://example.com/no-auth-check" }
 }
