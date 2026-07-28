@@ -1,0 +1,41 @@
+name: ShareToObsidian
+options:
+  minimumXcodeGenVersion: 2.42.0
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: 5.10
+    IPHONEOS_DEPLOYMENT_TARGET: 17.0
+    DEVELOPMENT_TEAM: ""
+targets:
+  ShareToObsidian:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Shared
+    entitlements:
+      path: App/ShareToObsidian.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hdwei.ShareToObsidian
+        INFOPLIST_FILE: App/Info.plist
+    dependencies:
+      - target: ShareToObsidianShareExtension
+        embed: true
+        codeSign: true
+  ShareToObsidianShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ShareExtension
+      - Shared
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hdwei.ShareToObsidian.ShareExtension
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
