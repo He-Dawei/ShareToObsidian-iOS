@@ -66,14 +66,17 @@ final class CaptureListModel {
             # ShareToObsidian iPhone 验收
 
             ## 核心内容
+
             这是一条从 iPhone App 主程序发起的验收收藏，用于确认 App 可以把队列内容同步到 Windows Obsidian Bridge。
 
             ## 验收点
+
             - App 可以创建收藏
             - App 可以连接电脑桥接器
             - Obsidian `移动收藏` 文件夹可以收到笔记
 
             ## 原始链接
+
             https://example.com/share-to-obsidian-ios-verify
             """
             let savedItem = try CaptureFileStore.append(item)

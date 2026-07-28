@@ -162,37 +162,37 @@ private struct CaptureRow: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(item.title)
-                    .font(.headline)
+                HStack {
+                    Text(item.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                    Spacer()
+                    Text(item.status.displayName)
+                        .font(.caption)
+                        .foregroundStyle(statusColor)
+                }
+                Text(item.summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .lineLimit(2)
-                Spacer()
-                Text(item.status.displayName)
-                    .font(.caption)
-                    .foregroundStyle(statusColor)
-            }
-            Text(item.summary)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            Text(item.platform.displayName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let syncError = item.syncError, item.status != .synced {
-                Label(syncError, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-            } else if let lastSyncedAt = item.lastSyncedAt {
-                Label("最近同步 \(lastSyncedAt.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.icloud")
+                Text(item.platform.displayName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if let lastSyncAttemptAt = item.lastSyncAttemptAt {
-                Label("最近尝试 \(lastSyncAttemptAt.formatted(date: .omitted, time: .shortened))", systemImage: "clock")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let syncError = item.syncError, item.status != .synced {
+                    Label(syncError, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                } else if let lastSyncedAt = item.lastSyncedAt {
+                    Label("最近同步 \(lastSyncedAt.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.icloud")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let lastSyncAttemptAt = item.lastSyncAttemptAt {
+                    Label("最近尝试 \(lastSyncAttemptAt.formatted(date: .omitted, time: .shortened))", systemImage: "clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-        }
         }
         .padding(.vertical, 4)
     }

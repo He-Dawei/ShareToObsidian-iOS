@@ -206,7 +206,7 @@ struct CaptureEditorView: View {
     private func markdownReplacingTranscript(in markdown: String, with transcript: String) -> String {
         let heading = "## 视频内容/口播转写"
         let nextAnchor = "\n## "
-        let fallback = "暂无口播转写。后续可接入字幕/语音转写后自动补全。"
+        let fallback = "暂无口播转写。后续可接入字幕或语音转写后自动补全。"
         let body = transcript.isEmpty ? fallback : transcript
         let section = "\(heading)\n\n\(body)\n"
 
