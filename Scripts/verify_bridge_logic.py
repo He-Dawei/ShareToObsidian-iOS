@@ -393,6 +393,7 @@ def main() -> int:
         "tags": ["移动收藏", "AI"],
     }
     original_urlopen = bridge.urllib.request.urlopen
+    original_build_opener = bridge.urllib.request.build_opener
     old_ai_key = os.environ.get("VERIFY_AI_KEY")
     old_ai_base = os.environ.get("VERIFY_AI_BASE")
     old_ai_model = os.environ.get("VERIFY_AI_MODEL")
@@ -474,8 +475,27 @@ def main() -> int:
         assert openai_request.full_url == "https://api.example.test/v1/chat/completions"
         assert openai_headers["authorization"] == "Bearer test-key"
         assert openai_body["model"] == "test-openai-model"
+
+        direct_handlers = []
+
+        class FakeOpener:
+            def open(self, request, timeout: int):
+                return fake_urlopen(request, timeout)
+
+        def fake_build_opener(*handlers):
+            direct_handlers.extend(handlers)
+            return FakeOpener()
+
+        bridge.urllib.request.build_opener = fake_build_opener
+        direct_config = json.loads(json.dumps(anthropic_config))
+        direct_config["ai"]["direct_network"] = True
+        assert bridge.generate_markdown_draft(direct_config, ai_item) == ai_draft
+        assert len(direct_handlers) == 1
+        assert isinstance(direct_handlers[0], bridge.urllib.request.ProxyHandler)
+        assert direct_handlers[0].proxies == {}
     finally:
         bridge.urllib.request.urlopen = original_urlopen
+        bridge.urllib.request.build_opener = original_build_opener
         for name, value in (
             ("VERIFY_AI_KEY", old_ai_key),
             ("VERIFY_AI_BASE", old_ai_base),

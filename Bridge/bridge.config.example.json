@@ -35,6 +35,7 @@
     "base_url_env": "ANTHROPIC_BASE_URL",
     "model_env": "ANTHROPIC_MODEL",
     "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+    "direct_network": false,
     "timeout_seconds": 60
   }
 }

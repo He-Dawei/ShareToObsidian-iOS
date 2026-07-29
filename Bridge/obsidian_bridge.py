@@ -1220,7 +1220,7 @@ def generate_ai_markdown_draft(config: dict, item: dict) -> dict | None:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with open_ai_request(ai, request, timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError):
         return None
@@ -1240,6 +1240,13 @@ def generate_ai_markdown_draft(config: dict, item: dict) -> dict | None:
         )
 
     return parse_ai_draft(content, item)
+
+
+def open_ai_request(ai: dict, request: urllib.request.Request, timeout: int):
+    if ai.get("direct_network", False):
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return opener.open(request, timeout=timeout)
+    return urllib.request.urlopen(request, timeout=timeout)
 
 
 def ai_value(ai: dict, key: str, default: str) -> str:
