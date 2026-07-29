@@ -401,13 +401,14 @@ def enrich_capture_in_background(config: dict, item: dict, write_lock: threading
             generated,
             write_lock,
         )
-        if persisted is None or metadata.get("transcript") or metadata.get("content_text"):
+        platform = str(item.get("platform") or detect_platform(str(item.get("url") or "")))
+        if persisted is None or not should_transcribe_capture(config, metadata, platform):
             return
 
         transcript, transcription_error = transcribe_capture_audio(
             config,
             str(item.get("url") or ""),
-            str(item.get("platform") or detect_platform(str(item.get("url") or ""))),
+            platform,
         )
         if not transcript:
             if transcription_error:
@@ -823,6 +824,19 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
         transcript = output_path.read_text(encoding="utf-8", errors="replace").strip()
         max_chars = int(transcription.get("max_chars", config.get("content_max_chars", 12000)))
         return transcript[:max_chars], ""
+
+
+def should_transcribe_capture(config: dict, metadata: dict, platform: str) -> bool:
+    if metadata.get("transcript"):
+        return False
+    transcription = config.get("transcription") or {}
+    if not transcription.get("enabled", False):
+        return False
+    enabled_platforms = {
+        str(value).lower()
+        for value in transcription.get("platforms") or ["douyin", "bilibili", "xiaohongshu"]
+    }
+    return platform.lower() in enabled_platforms
 
 
 def fetch_web_content(config: dict, url: str) -> tuple[dict, str]:

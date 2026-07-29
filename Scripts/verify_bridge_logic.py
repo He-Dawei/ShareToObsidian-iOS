@@ -296,6 +296,28 @@ def main() -> int:
         assert "--audio-format" in commands[0]
         assert commands[1][0] == "fake-asr"
 
+    transcription_config = {
+        "transcription": {
+            "enabled": True,
+            "platforms": ["douyin", "bilibili"],
+        }
+    }
+    assert bridge.should_transcribe_capture(
+        transcription_config,
+        {"content_text": "只有页面介绍，还没有视频转写。"},
+        "bilibili",
+    )
+    assert not bridge.should_transcribe_capture(
+        transcription_config,
+        {"transcript": "已经存在字幕。"},
+        "bilibili",
+    )
+    assert not bridge.should_transcribe_capture(
+        transcription_config,
+        {"content_text": "普通网页正文。"},
+        "web",
+    )
+
     with tempfile.TemporaryDirectory() as tmp:
         relay_root = Path(tmp) / "iCloudRelay"
         queue_dir = relay_root / "Queue"
