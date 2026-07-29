@@ -16,6 +16,15 @@
   "content_max_chars": 12000,
   "background_enrichment_enabled": true,
   "background_enrichment_workers": 1,
+  "transcription": {
+    "enabled": false,
+    "platforms": ["douyin", "bilibili"],
+    "ffmpeg_path": "C:/Users/44527/ffmpeg/bin/ffmpeg.exe",
+    "download_timeout_seconds": 180,
+    "timeout_seconds": 1800,
+    "max_chars": 12000,
+    "command": []
+  },
   "cloud_relay_dir": "",
   "cloud_relay_poll_seconds": 5,
   "knowledge_recent_limit": 80,

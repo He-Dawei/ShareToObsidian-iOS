@@ -902,6 +902,7 @@ $captureListModelText = Get-Content -LiteralPath (Join-Path $repoRoot "App\Captu
 foreach ($needle in @(
     "clearLastError",
     "func add(urlText: String) -> Bool",
+    "Self.firstSupportedURL(in: urlText)",
     "func handleDeepLink(_ url: URL) async",
     "case `"capture`", `"add`", `"share`":",
     "private static func capturePayload(from url: URL)",
@@ -979,6 +980,9 @@ foreach ($needle in @(
 }
 
 $saveIntentText = Get-Content -LiteralPath (Join-Path $repoRoot "App\SaveToObsidianIntent.swift") -Raw -Encoding UTF8
+if ($saveIntentText.Contains("URL(string: cleaned)")) {
+    throw "SaveToObsidianIntent must extract the URL from full platform share text instead of treating all text as one URL."
+}
 foreach ($needle in @(
     "import AppIntents",
     "struct SaveToObsidianIntent: AppIntent",

@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -108,6 +109,11 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
                 if path == "/drafts":
                     self.write_json(generate_markdown_draft(config, item))
                     return
+                synced_at = dt.datetime.now(dt.timezone.utc).isoformat()
+                item["status"] = "synced"
+                item["syncError"] = None
+                item["lastSyncedAt"] = synced_at
+                item["updatedAt"] = synced_at
                 with write_lock:
                     note_path = write_capture_note(config, item)
                     rebuild_knowledge_synthesis(config)
@@ -120,7 +126,7 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
                         "item": item,
                     }
                 )
-                if fast and config.get("background_enrichment_enabled", True):
+                if config.get("background_enrichment_enabled", True):
                     pending_item = dict(item)
                     pending_item["remoteNotePath"] = relative_path
                     enrichment_executor.submit(
@@ -378,7 +384,9 @@ def read_capture_item(config: dict, payload: dict) -> dict:
 
 def enrich_capture_in_background(config: dict, item: dict, write_lock: threading.Lock) -> None:
     try:
-        metadata = fetch_metadata(config, str(item.get("url") or ""))
+        metadata = item.get("metadata")
+        if not isinstance(metadata, dict) or not metadata:
+            metadata = fetch_metadata(config, str(item.get("url") or ""))
         candidate = enrich_capture(
             config,
             item,
@@ -386,30 +394,84 @@ def enrich_capture_in_background(config: dict, item: dict, write_lock: threading
             metadata_override=metadata,
         )
         generated = draft_for_automatic_processing(config, candidate)
+        persisted = persist_background_enrichment(
+            config,
+            item,
+            metadata,
+            generated,
+            write_lock,
+        )
+        if persisted is None or metadata.get("transcript") or metadata.get("content_text"):
+            return
 
-        with write_lock:
-            try:
-                latest = read_capture_item(config, item)
-            except FileNotFoundError:
-                return
+        transcript, transcription_error = transcribe_capture_audio(
+            config,
+            str(item.get("url") or ""),
+            str(item.get("platform") or detect_platform(str(item.get("url") or ""))),
+        )
+        if not transcript:
+            if transcription_error:
+                print(f"Background transcription failed for {item.get('url')}: {transcription_error}")
+            return
 
-            merged = enrich_capture(
-                config,
-                latest,
-                fetch_remote_metadata=False,
-                metadata_override=metadata,
-            )
-            generated_tags = [str(tag) for tag in generated.get("tags") or [] if str(tag).strip()]
-            merged["tags"] = list(dict.fromkeys([*(merged.get("tags") or []), *generated_tags]))
-            merged["alternativeDrafts"] = generated.get("alternatives") or merged.get("alternativeDrafts") or []
-            if merged.get("isUserEdited") is not True:
-                merged["summary"] = generated.get("summary") or merged.get("summary")
-                merged["draftMarkdown"] = generated.get("markdown") or merged.get("draftMarkdown")
-            merged["backgroundEnrichedAt"] = dt.datetime.now(dt.timezone.utc).isoformat()
-            write_capture_note(config, merged)
-            rebuild_knowledge_synthesis(config)
+        transcript_metadata = dict(metadata)
+        transcript_metadata["transcript"] = transcript
+        transcript_metadata["transcription_engine"] = "VibeASR.cpp"
+        transcript_candidate = enrich_capture(
+            config,
+            persisted,
+            fetch_remote_metadata=False,
+            metadata_override=transcript_metadata,
+        )
+        transcript_draft = draft_for_automatic_processing(config, transcript_candidate)
+        persist_background_enrichment(
+            config,
+            persisted,
+            transcript_metadata,
+            transcript_draft,
+            write_lock,
+            completion_field="backgroundTranscribedAt",
+        )
     except Exception as exc:
         print(f"Background enrichment failed for {item.get('url')}: {exc}")
+
+
+def persist_background_enrichment(
+    config: dict,
+    item: dict,
+    metadata: dict,
+    generated: dict,
+    write_lock: threading.Lock,
+    completion_field: str = "backgroundEnrichedAt",
+) -> dict | None:
+    with write_lock:
+        try:
+            latest = read_capture_item(config, item)
+        except FileNotFoundError:
+            return None
+
+        merged = enrich_capture(
+            config,
+            latest,
+            fetch_remote_metadata=False,
+            metadata_override=metadata,
+        )
+        generated_tags = [str(tag) for tag in generated.get("tags") or [] if str(tag).strip()]
+        merged["tags"] = list(dict.fromkeys([*(merged.get("tags") or []), *generated_tags]))
+        merged["alternativeDrafts"] = generated.get("alternatives") or merged.get("alternativeDrafts") or []
+        if merged.get("isUserEdited") is not True:
+            merged["summary"] = generated.get("summary") or merged.get("summary")
+            merged["draftMarkdown"] = generated.get("markdown") or merged.get("draftMarkdown")
+        completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        merged["status"] = "synced"
+        merged["syncError"] = None
+        merged["lastSyncedAt"] = merged.get("lastSyncedAt") or completed_at
+        merged["updatedAt"] = completed_at
+        merged["backgroundEnrichedAt"] = completed_at
+        merged[completion_field] = completed_at
+        write_capture_note(config, merged)
+        rebuild_knowledge_synthesis(config)
+        return merged
 
 
 def start_cloud_relay_worker(config: dict, write_lock: threading.Lock) -> threading.Thread | None:
@@ -657,6 +719,98 @@ def fetch_ytdlp_metadata(config: dict, url: str) -> tuple[dict, str]:
     except json.JSONDecodeError as exc:
         return {}, str(exc)
     return compact_metadata(raw, config), ""
+
+
+def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str, str]:
+    transcription = config.get("transcription") or {}
+    if not transcription.get("enabled", False):
+        return "", ""
+    enabled_platforms = {
+        str(value).lower()
+        for value in transcription.get("platforms") or ["douyin", "bilibili", "xiaohongshu"]
+    }
+    if platform.lower() not in enabled_platforms:
+        return "", ""
+
+    ytdlp = find_ytdlp(config)
+    command_template = transcription.get("command") or []
+    if not ytdlp:
+        return "", "yt-dlp 未安装或路径无效"
+    if not command_template:
+        return "", "transcription.command 未配置"
+
+    with tempfile.TemporaryDirectory(prefix="sharetoobsidian-asr-") as tmp:
+        work_dir = Path(tmp)
+        audio_template = work_dir / "audio.%(ext)s"
+        download_command = [
+            ytdlp,
+            "--no-playlist",
+            "--no-warnings",
+            "--socket-timeout",
+            str(config.get("metadata_socket_timeout", 12)),
+        ]
+        cookies_file = find_cookies_file(config)
+        if cookies_file:
+            download_command.extend(["--cookies", cookies_file])
+        ffmpeg_path = str(transcription.get("ffmpeg_path") or "").strip()
+        if ffmpeg_path:
+            download_command.extend(["--ffmpeg-location", ffmpeg_path])
+        download_command.extend(
+            [
+                "-x",
+                "--audio-format",
+                "wav",
+                "-o",
+                str(audio_template),
+                "--",
+                url,
+            ]
+        )
+        try:
+            downloaded = subprocess.run(
+                download_command,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                timeout=int(transcription.get("download_timeout_seconds", 180)),
+            )
+        except Exception as exc:
+            return "", str(exc)
+        if downloaded.returncode != 0:
+            return "", downloaded.stderr.strip()[-500:]
+
+        audio_files = sorted(work_dir.glob("audio*.wav"))
+        if not audio_files:
+            return "", "yt-dlp 未生成 WAV 音频"
+        output_path = work_dir / "transcript.txt"
+        values = {
+            "audio": str(audio_files[0]),
+            "output": str(output_path),
+        }
+        command = [
+            str(part).replace("{audio}", values["audio"]).replace("{output}", values["output"])
+            for part in command_template
+        ]
+        try:
+            transcribed = subprocess.run(
+                command,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                timeout=int(transcription.get("timeout_seconds", 1800)),
+            )
+        except Exception as exc:
+            return "", str(exc)
+        if transcribed.returncode != 0:
+            return "", transcribed.stderr.strip()[-500:]
+        if not output_path.exists():
+            return "", "转写命令未生成输出文件"
+
+        transcript = output_path.read_text(encoding="utf-8", errors="replace").strip()
+        max_chars = int(transcription.get("max_chars", config.get("content_max_chars", 12000)))
+        return transcript[:max_chars], ""
 
 
 def fetch_web_content(config: dict, url: str) -> tuple[dict, str]:

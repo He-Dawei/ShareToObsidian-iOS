@@ -42,11 +42,6 @@ struct SaveToObsidianIntent: AppIntent {
 
     private static func firstSupportedURL(in text: String) -> URL? {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let directURL = URL(string: cleaned),
-           SupportedShareURL.isSupported(directURL) {
-            return directURL
-        }
-
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
         let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
         return detector?

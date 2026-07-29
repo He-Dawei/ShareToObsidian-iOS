@@ -199,6 +199,9 @@ def main() -> int:
             assert "后台精炼" in completed["tags"]
             assert completed["remoteNotePath"] == relative_path
             assert completed["backgroundEnrichedAt"]
+            assert completed["status"] == "synced"
+            assert completed["lastSyncedAt"]
+            assert completed["syncError"] is None
 
             completed["isUserEdited"] = True
             completed["summary"] = "用户摘要"
@@ -215,6 +218,54 @@ def main() -> int:
         finally:
             bridge.fetch_metadata = original_fetch_metadata
             bridge.generate_markdown_draft = original_generate_draft
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fake_ytdlp = root / "yt-dlp.exe"
+        fake_ytdlp.write_text("", encoding="utf-8")
+        commands = []
+        original_run = bridge.subprocess.run
+
+        def fake_transcription_run(command, **_kwargs):
+            commands.append(command)
+            if str(command[0]) == str(fake_ytdlp):
+                (root / "work-audio-placeholder").write_text("", encoding="utf-8")
+                output_template = Path(command[command.index("-o") + 1])
+                output_template.with_name("audio.wav").write_bytes(b"RIFF")
+            else:
+                output_path = Path(command[command.index("--output") + 1])
+                output_path.write_text("[00:00] 本地转写成功", encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        try:
+            bridge.subprocess.run = fake_transcription_run
+            transcript, error = bridge.transcribe_capture_audio(
+                {
+                    "ytdlp_path": str(fake_ytdlp),
+                    "cookies_file": str(root / "cookies.txt"),
+                    "transcription": {
+                        "enabled": True,
+                        "platforms": ["douyin"],
+                        "command": [
+                            "fake-asr",
+                            "--audio",
+                            "{audio}",
+                            "--output",
+                            "{output}",
+                        ],
+                    },
+                },
+                "https://v.douyin.com/test",
+                "douyin",
+            )
+        finally:
+            bridge.subprocess.run = original_run
+
+        assert not error
+        assert transcript == "[00:00] 本地转写成功"
+        assert len(commands) == 2
+        assert "--audio-format" in commands[0]
+        assert commands[1][0] == "fake-asr"
 
     with tempfile.TemporaryDirectory() as tmp:
         relay_root = Path(tmp) / "iCloudRelay"

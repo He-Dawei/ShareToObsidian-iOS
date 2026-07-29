@@ -47,9 +47,8 @@ final class CaptureListModel {
     }
 
     func add(urlText: String) -> Bool {
-        guard let url = URL(string: urlText.trimmingCharacters(in: .whitespacesAndNewlines)),
-              SupportedShareURL.isSupported(url) else {
-            lastError = "链接格式不正确"
+        guard let url = Self.firstSupportedURL(in: urlText) else {
+            lastError = "没有在分享文字中找到 http/https 链接"
             return false
         }
         do {
