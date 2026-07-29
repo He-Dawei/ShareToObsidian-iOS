@@ -350,6 +350,7 @@ $requiredFiles = @(
     "Bridge\bridge.config.example.json",
     "Scripts\export_mac_build_package.ps1",
     "Scripts\wait_for_iphone_verification.ps1",
+    "Scripts\wait_for_cloud_relay_verification.ps1",
     "ShareExtension\Info.plist",
     "ShareExtension\ShareExtension.entitlements",
     "Shared\CaptureItem.swift",
@@ -559,6 +560,18 @@ foreach ($needle in @(
     }
 }
 
+$waitForCloudRelayText = Get-Content -LiteralPath (Join-Path $repoRoot "Scripts\wait_for_cloud_relay_verification.ps1") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "cloud_relay_dir",
+    "https://example.com/share-to-obsidian-icloud-relay-verify",
+    "ICLOUD_RELAY_VERIFICATION_OK",
+    "ICLOUD_RELAY_VERIFICATION_TIMEOUT"
+)) {
+    if (-not $waitForCloudRelayText.Contains($needle)) {
+        throw "wait_for_cloud_relay_verification.ps1 missing expected device verification behavior: $needle"
+    }
+}
+
 $settingsViewText = Get-Content -LiteralPath (Join-Path $repoRoot "App\SettingsView.swift") -Raw -Encoding UTF8
 $verificationCaptureButtonText = New-TextFromCodePoints @(21457,36865,39564,25910,25910,34255)
 foreach ($needle in @(
@@ -571,7 +584,8 @@ foreach ($needle in @(
     "model.lastStatusMessage",
     "statusMessage",
     "allowedContentTypes: [.folder]",
-    "model.configureCloudRelay(folderURL: folderURL)"
+    "model.configureCloudRelay(folderURL: folderURL)",
+    "model.createCloudRelayVerificationCapture()"
 )) {
     if (-not $settingsViewText.Contains($needle)) {
         throw "SettingsView missing iPhone clipboard pairing import support: $needle"

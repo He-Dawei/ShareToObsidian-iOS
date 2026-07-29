@@ -296,6 +296,39 @@ final class CaptureListModel {
         lastStatusMessage = "iCloud 离线中转已关闭"
     }
 
+    func createCloudRelayVerificationCapture() {
+        guard CloudRelayStore.isConfigured,
+              let url = URL(string: "https://example.com/share-to-obsidian-icloud-relay-verify") else {
+            cloudRelayError = "请先选择 iCloud 中转文件夹"
+            return
+        }
+        do {
+            var item = CaptureItem(url: url, title: "ShareToObsidian iCloud 离线验收", sourceApp: "iCloud Relay Verification")
+            item.summary = "验证电脑关机期间由 iCloud 保存，Windows 开机后自动写入 Obsidian。"
+            item.tags = ["iCloud验收", "ShareToObsidian"]
+            item.status = .queued
+            item.isUserEdited = true
+            item.draftMarkdown = """
+            # ShareToObsidian iCloud 离线验收
+
+            ## 核心内容
+
+            该条目只写入 iCloud 中转队列，不通过局域网直连，用于验证 Windows Bridge 开机主动消费离线收藏。
+
+            ## 原始链接
+
+            https://example.com/share-to-obsidian-icloud-relay-verify
+            """
+            let savedItem = try CaptureFileStore.append(item)
+            try CloudRelayStore.enqueue(savedItem)
+            reload()
+            cloudRelayError = nil
+            lastStatusMessage = "iCloud 离线验收已发送"
+        } catch {
+            cloudRelayError = error.localizedDescription
+        }
+    }
+
     func regenerateDrafts(for item: CaptureItem) async -> CaptureItem {
         guard let baseURL = URL(string: bridgeAddress) else {
             lastError = "电脑桥接地址无效"

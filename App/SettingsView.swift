@@ -64,6 +64,11 @@ struct SettingsView: View {
                         Label("选择 iCloud 中转文件夹", systemImage: "folder.badge.plus")
                     }
                     if model.cloudRelayFolderName != nil {
+                        Button {
+                            model.createCloudRelayVerificationCapture()
+                        } label: {
+                            Label("发送离线中转验收", systemImage: "checkmark.icloud")
+                        }
                         Button(role: .destructive) {
                             model.clearCloudRelay()
                         } label: {

@@ -231,6 +231,14 @@ iPhone 安装新版后，在“同步设置”→“电脑离线中转”中选�
 3. Windows 开机登录后，`ShareToObsidianBridge` 自动消费队列并生成完整 Obsidian 笔记。
 4. App 下次打开时读取 `Processed/`，显示远端元数据、AI 文案和同步状态。
 
+真机验收时先在 Windows 运行：
+
+```powershell
+.\Scripts\wait_for_cloud_relay_verification.ps1
+```
+
+然后在 iPhone“同步设置”→“电脑离线中转”点“发送离线中转验收”。出现 `ICLOUD_RELAY_VERIFICATION_OK` 即表示手机到 iCloud、Windows Bridge、Obsidian 的离线链路完整通过。
+
 Windows 端一键验收：
 
 ```powershell
