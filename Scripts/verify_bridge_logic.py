@@ -142,6 +142,158 @@ def main() -> int:
         "WEBVTT\n\n00:00:03.000 --> 00:00:05.000\n<b>VTT 字幕</b>"
     ) == "[00:03] VTT 字幕"
 
+    with tempfile.TemporaryDirectory() as tmp:
+        config = {
+            "obsidian_vault": tmp,
+            "notes_subdir": "移动收藏",
+            "ai": {"enabled": False},
+        }
+        bridge.ensure_vault_layout(config)
+        background_item = {
+            "id": "background-verifier",
+            "url": "https://example.com/background",
+            "platform": "web",
+            "title": "网页收藏内容",
+            "summary": "待提炼：后台验证",
+            "draftMarkdown": "# 后台验证\n\n## 核心内容\n\n待提炼\n",
+            "alternativeDrafts": [],
+            "tags": ["移动收藏"],
+            "status": "queued",
+            "isUserEdited": False,
+            "createdAt": "2026-07-29T08:00:00Z",
+            "updatedAt": "2026-07-29T08:00:00Z",
+        }
+        note_path = bridge.write_capture_note(config, background_item)
+        relative_path = note_path.relative_to(bridge.notes_root(config)).as_posix()
+        background_item["remoteNotePath"] = relative_path
+
+        original_fetch_metadata = bridge.fetch_metadata
+        original_generate_draft = bridge.generate_markdown_draft
+
+        def fake_background_metadata(_config, _url):
+            return {
+                "title": "后台已提取标题",
+                "description": "后台已提取摘要。",
+                "content_text": "后台正文",
+                "extractor": "Verifier",
+            }
+
+        def fake_background_draft(_config, _item):
+            return {
+                "summary": "后台 AI 摘要",
+                "markdown": "# 后台完成稿\n\n## 核心内容\n\n后台精炼成功。\n",
+                "alternatives": ["# 版本一", "# 版本二", "# 版本三"],
+                "tags": ["移动收藏", "后台精炼"],
+            }
+
+        try:
+            bridge.fetch_metadata = fake_background_metadata
+            bridge.generate_markdown_draft = fake_background_draft
+            bridge.enrich_capture_in_background(config, background_item, bridge.threading.Lock())
+
+            completed = bridge.read_capture_item(config, {"path": relative_path})
+            assert completed["metadata"]["content_text"] == "后台正文"
+            assert completed["summary"] == "后台 AI 摘要"
+            assert "后台精炼成功" in completed["draftMarkdown"]
+            assert completed["alternativeDrafts"] == ["# 版本一", "# 版本二", "# 版本三"]
+            assert "后台精炼" in completed["tags"]
+            assert completed["remoteNotePath"] == relative_path
+            assert completed["backgroundEnrichedAt"]
+
+            completed["isUserEdited"] = True
+            completed["summary"] = "用户摘要"
+            completed["draftMarkdown"] = "# 用户最终稿"
+            bridge.write_capture_note(config, completed)
+            bridge.enrich_capture_in_background(config, completed, bridge.threading.Lock())
+            preserved = bridge.read_capture_item(config, {"path": relative_path})
+            assert preserved["summary"] == "用户摘要"
+            assert preserved["draftMarkdown"] == "# 用户最终稿"
+
+            bridge.delete_capture_note(config, {"path": relative_path})
+            bridge.enrich_capture_in_background(config, completed, bridge.threading.Lock())
+            assert not note_path.exists()
+        finally:
+            bridge.fetch_metadata = original_fetch_metadata
+            bridge.generate_markdown_draft = original_generate_draft
+
+    with tempfile.TemporaryDirectory() as tmp:
+        relay_root = Path(tmp) / "iCloudRelay"
+        queue_dir = relay_root / "Queue"
+        queue_dir.mkdir(parents=True)
+        config = {
+            "obsidian_vault": str(Path(tmp) / "vault"),
+            "notes_subdir": "移动收藏",
+            "cloud_relay_dir": str(relay_root),
+            "ai": {"enabled": False},
+        }
+        bridge.ensure_vault_layout(config)
+        relay_id = "60f842a1-9370-4f7f-84d3-998f8501ee55"
+        relay_item = {
+            "id": relay_id,
+            "url": "https://example.com/cloud-relay",
+            "platform": "web",
+            "title": "iCloud 中转验证",
+            "summary": "待提炼",
+            "draftMarkdown": "# iCloud 中转验证\n\n待提炼\n",
+            "alternativeDrafts": [],
+            "tags": ["移动收藏"],
+            "status": "queued",
+            "isUserEdited": False,
+            "createdAt": "2026-07-29T08:00:00Z",
+            "updatedAt": "2026-07-29T08:00:00Z",
+        }
+        queue_path = queue_dir / f"{relay_id}.json"
+        queue_path.write_text(json.dumps(relay_item, ensure_ascii=False), encoding="utf-8")
+
+        original_fetch_metadata = bridge.fetch_metadata
+        original_generate_draft = bridge.generate_markdown_draft
+        try:
+            bridge.fetch_metadata = lambda _config, _url: {
+                "title": "iCloud 中转已提取",
+                "description": "电脑开机后已自动消费离线队列。",
+                "content_text": "离线正文",
+            }
+            bridge.generate_markdown_draft = lambda _config, _item: {
+                "summary": "离线队列已完成",
+                "markdown": "# 离线完成稿\n\n## 核心内容\n\n电脑开机自动处理。\n",
+                "alternatives": ["# A", "# B", "# C"],
+                "tags": ["移动收藏", "离线中转"],
+            }
+            processed = bridge.process_cloud_relay_file(config, queue_path, bridge.threading.Lock())
+            processed_path = relay_root / "Processed" / f"{relay_id}.json"
+            assert not queue_path.exists()
+            assert processed_path.exists()
+            assert processed["status"] == "synced"
+            assert processed["metadata"]["content_text"] == "离线正文"
+            assert processed["remoteNotePath"].startswith("10_Notes/")
+            note_path = bridge.notes_root(config) / processed["remoteNotePath"]
+            assert note_path.exists()
+            assert "电脑开机自动处理" in note_path.read_text(encoding="utf-8")
+
+            repeated_item = dict(relay_item)
+            repeated_item["isUserEdited"] = True
+            repeated_item["summary"] = "用户稍后编辑"
+            repeated_item["draftMarkdown"] = "# 用户稍后编辑稿"
+            repeated_item["updatedAt"] = "2026-07-29T08:30:00Z"
+            queue_path.write_text(json.dumps(repeated_item, ensure_ascii=False), encoding="utf-8")
+            repeated = bridge.process_cloud_relay_file(config, queue_path, bridge.threading.Lock())
+            assert repeated["remoteNotePath"] == processed["remoteNotePath"]
+            assert note_path.read_text(encoding="utf-8").strip() == "# 用户稍后编辑稿"
+            assert len(list((bridge.notes_root(config) / "10_Notes").glob("*.md"))) == 1
+
+            deleted_item = dict(repeated)
+            deleted_item["status"] = "deleted"
+            deleted_item["updatedAt"] = "2026-07-29T09:00:00Z"
+            queue_path.write_text(json.dumps(deleted_item, ensure_ascii=False), encoding="utf-8")
+            deletion = bridge.process_cloud_relay_file(config, queue_path, bridge.threading.Lock())
+            assert deletion["status"] == "deleted"
+            assert not note_path.exists()
+            deletion_ack = json.loads(processed_path.read_text(encoding="utf-8"))
+            assert deletion_ack["status"] == "deleted"
+        finally:
+            bridge.fetch_metadata = original_fetch_metadata
+            bridge.generate_markdown_draft = original_generate_draft
+
     ai_item = {
         "url": "https://example.com/ai-draft",
         "platform": "web",

@@ -119,6 +119,7 @@ final class ShareViewController: UIViewController {
                     var item = CaptureItem(url: url, title: title, sourceApp: "Share Extension")
                     item.status = .queued
                     let savedItem = try CaptureFileStore.append(item)
+                    try? CloudRelayStore.enqueue(savedItem)
                     savedIDs.append(savedItem.id)
                 }
                 self.updateStatus("已保存到队列", detail: "正在尝试同步到电脑 Obsidian")

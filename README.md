@@ -9,7 +9,7 @@
 3. App 保存链接，识别平台，生成 Obsidian Markdown 草稿。
 4. 用户在 App 内查看、切换不同文案版本、编辑、删除。
 5. 电脑在线时实时 POST 到 Windows 桥接器写入 Obsidian。
-6. 电脑离线时保留在 App 待同步队列，之后再次打开 App 或电脑桥接器恢复时补同步。
+6. 电脑离线时保留本地队列；启用 iCloud 中转后，Windows 开机即可主动消费队列，不依赖再次唤醒 App。
 
 当前已落地内容：
 
@@ -29,7 +29,9 @@
 - App 设置页可发送一条固定验收收藏，用于验证 iPhone 到 Windows Obsidian Bridge 的同步链路
 - App 详情页可调用 Bridge `/metadata` 刷新视频信息，并展示作者、简介、时长、播放/点赞、封面链接
 - App 可调用桥接器 `/drafts` 重新生成 3 种 Obsidian 文案版本
-- Share Extension 保存分享后会用 fast 模式立即尝试同步最多 3 条待处理队列；fast 模式跳过耗时元数据提取，电脑不在线时保留队列，之后由 App 补同步
+- Share Extension 保存分享后会用 fast 模式立即尝试同步；Bridge 快速确认入库后在后台继续提取正文/字幕、生成 AI 文案并原路径更新
+- App 回到前台会从 Bridge 拉取后台完成的最新条目，避免本地占位稿覆盖已精炼笔记
+- 可选择 `iCloud Drive/ShareToObsidian` 作为离线中转目录；电脑关机期间的分享会写入 `Queue/`，Windows Bridge 登录启动后自动处理并把结果写入 `Processed/`
 - App 删除已同步内容时会调用 Bridge 把 Obsidian 笔记和原始 JSON 移入 `80_Trash`
 - 桥接器支持 OpenAI/Anthropic 兼容的 AI 文案生成；DeepSeek 可直接读取 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`ANTHROPIC_AUTH_TOKEN`，失败时自动回退本地模板
 - AI 生成标签时优先复用 Vault 已有标签，减少知识分类不断分叉
@@ -212,6 +214,21 @@ cd C:\Users\44527\Documents\Codex\2026-07-24\codex-reconnecting-codex-env-3\outp
 ```text
 http://127.0.0.1:8765/health
 ```
+
+## iCloud 离线中转
+
+Windows 已使用以下目录作为电脑离线兜底：
+
+```text
+C:\Users\44527\iCloudDrive\ShareToObsidian
+```
+
+iPhone 安装新版后，在“同步设置”→“电脑离线中转”中选择 iCloud Drive 里的 `ShareToObsidian` 文件夹一次。之后：
+
+1. 局域网 Bridge 在线时仍直接实时同步。
+2. Bridge 不在线时，App/分享入口把 JSON 写入 iCloud `Queue/`。
+3. Windows 开机登录后，`ShareToObsidianBridge` 自动消费队列并生成完整 Obsidian 笔记。
+4. App 下次打开时读取 `Processed/`，显示远端元数据、AI 文案和同步状态。
 
 Windows 端一键验收：
 

@@ -55,6 +55,8 @@ cd C:\Users\44527\Documents\Codex\2026-07-24\codex-reconnecting-codex-env-3\outp
 - 桥接器会调用本机 `yt-dlp` 尝试补标题、作者/频道、简介、封面等元数据；失败不阻塞笔记创建。
 - App 已支持自动补同步、后台刷新重试、桥接器健康检查、Bridge Token、重新生成 3 种文案版本。
 - Share Extension 保存分享后会用 fast 模式立即尝试同步最多 3 条待处理队列；fast 模式跳过耗时元数据提取，详情页仍可手动刷新视频信息。
+- Bridge 会在 fast 入库后继续后台提取正文/字幕和 AI 文案，并保留用户后续编辑。
+- iCloud Drive 离线队列已落地；Windows 开机后可主动处理电脑关机期间的分享。
 - App 已支持粘贴导入 Windows 生成的 `pairing.local.json`。
 - App 详情页已支持刷新并查看结构化视频信息。
 - App 删除已同步收藏时，Bridge 会把 Obsidian 笔记和原始 JSON 移入 `80_Trash`，并刷新知识框架。
@@ -69,5 +71,4 @@ http://127.0.0.1:8765/health
 
 - 在 Mac/Xcode 上真机编译验证 Share Extension。
 - 在真机设置里确认 `Background App Refresh` 已开启；iOS 后台同步由系统调度，不能保证电脑一开机立即触发，但 App 前台、回到前台和后台唤醒都会补同步。
-- 增加 iCloud/CloudKit 队列，电脑离线时不依赖局域网。
 - 加一个定时复盘任务，让 Codex/Claude 定期读取 `移动收藏` 文件夹并继续细化知识图谱。

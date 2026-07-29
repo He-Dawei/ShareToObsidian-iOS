@@ -44,6 +44,20 @@ enum CaptureFileStore {
         }
     }
 
+    static func reconcileCloudRelay() throws -> [CaptureItem] {
+        try withFileLock {
+            let current = loadUnlocked()
+            guard CloudRelayStore.isConfigured else {
+                return current
+            }
+            let reconciled = try CloudRelayStore.reconcile(current)
+            if reconciled != current {
+                try saveUnlocked(reconciled)
+            }
+            return reconciled
+        }
+    }
+
     @discardableResult
     static func append(_ item: CaptureItem) throws -> CaptureItem {
         try withFileLock {

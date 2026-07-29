@@ -15,7 +15,7 @@ enum CaptureSyncRunner {
         enrichSyncedMissingMetadata: Bool = false,
         prioritizedIDs: [UUID] = []
     ) async -> CaptureSyncSummary {
-        let originalItems = CaptureFileStore.load()
+        let originalItems = (try? CaptureFileStore.reconcileCloudRelay()) ?? CaptureFileStore.load()
         var items = prioritize(originalItems, ids: prioritizedIDs)
         guard let baseURL = URL(string: bridgeAddress) else {
             let errorMessage = "电脑桥接地址无效"
@@ -27,6 +27,7 @@ enum CaptureSyncRunner {
                 items[index].lastSyncAttemptAt = attemptedAt
                 items[index].syncError = errorMessage
                 items[index].updatedAt = attemptedAt
+                try? CloudRelayStore.enqueue(items[index])
             }
             var finalItems = items
             try? CaptureFileStore.update { latestItems in
@@ -66,22 +67,32 @@ enum CaptureSyncRunner {
             items[index].syncError = nil
             do {
                 if items[index].status == .deleted {
+                    let itemID = items[index].id
                     if let remoteNotePath = items[index].remoteNotePath, !remoteNotePath.isEmpty {
                         try await client.deleteRemoteNote(path: remoteNotePath)
                     }
                     items.remove(at: index)
+                    try? CloudRelayStore.removeQueuedItem(id: itemID)
                     syncedCount += 1
                     continue
                 } else if items[index].status == .synced {
-                    items[index].lastMetadataRefreshAttemptAt = attemptedAt
-                    let enriched = try await client.refreshMetadata(for: items[index])
-                    let result = try await client.push(enriched, fast: false)
-                    items[index] = result.item ?? enriched
-                    items[index].status = .synced
-                    items[index].remoteNotePath = result.relativePath ?? result.path
-                    items[index].lastSyncedAt = Date()
-                    items[index].updatedAt = items[index].lastSyncedAt ?? attemptedAt
-                    syncedCount += 1
+                    guard let remoteNotePath = items[index].remoteNotePath else {
+                        throw URLError(.fileDoesNotExist)
+                    }
+                    let remote = try await client.fetchRemoteCapture(path: remoteNotePath)
+                    if remote.metadata != nil {
+                        items[index] = remote
+                        items[index].status = .synced
+                        items[index].remoteNotePath = remoteNotePath
+                        items[index].syncError = nil
+                        items[index].lastMetadataRefreshAttemptAt = attemptedAt
+                        items[index].lastSyncedAt = Date()
+                        items[index].updatedAt = items[index].lastSyncedAt ?? attemptedAt
+                        try? CloudRelayStore.removeQueuedItem(id: items[index].id)
+                        syncedCount += 1
+                    } else {
+                        items[index].syncError = "电脑正在后台提炼内容"
+                    }
                 } else {
                     let result = try await client.push(items[index], fast: fast)
                     items[index] = result.item ?? items[index]
@@ -89,6 +100,7 @@ enum CaptureSyncRunner {
                     items[index].remoteNotePath = result.relativePath ?? result.path
                     items[index].lastSyncedAt = Date()
                     items[index].updatedAt = items[index].lastSyncedAt ?? attemptedAt
+                    try? CloudRelayStore.removeQueuedItem(id: items[index].id)
                     syncedCount += 1
                 }
             } catch {
@@ -97,6 +109,7 @@ enum CaptureSyncRunner {
                 }
                 items[index].syncError = error.localizedDescription
                 items[index].updatedAt = Date()
+                try? CloudRelayStore.enqueue(items[index])
                 lastError = error.localizedDescription
             }
             index += 1

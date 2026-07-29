@@ -24,6 +24,7 @@ struct SaveToObsidianIntent: AppIntent {
         var item = CaptureItem(url: url, title: cleanedTitle, sourceApp: "App Intent")
         item.status = .queued
         let savedItem = try CaptureFileStore.append(item)
+        try? CloudRelayStore.enqueue(savedItem)
 
         let summary = await CaptureSyncRunner.syncQueued(
             bridgeAddress: CaptureSettingsStore.bridgeAddress,

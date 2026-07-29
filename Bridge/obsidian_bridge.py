@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 from html import escape as html_escape, unescape as html_unescape
 from ipaddress import ip_address
@@ -10,6 +11,8 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,17 +27,25 @@ def main() -> int:
 
     config = json.loads(Path(args.config).read_text(encoding="utf-8"))
     ensure_vault_layout(config)
+    write_lock = threading.Lock()
+    start_cloud_relay_worker(config, write_lock)
 
     server = ThreadingHTTPServer(
         (config.get("host", "0.0.0.0"), int(config.get("port", 8765))),
-        handler_factory(config),
+        handler_factory(config, write_lock),
     )
     print(f"Obsidian bridge listening on http://{config.get('host', '0.0.0.0')}:{config.get('port', 8765)}")
     server.serve_forever()
     return 0
 
 
-def handler_factory(config: dict):
+def handler_factory(config: dict, write_lock: threading.Lock | None = None):
+    write_lock = write_lock or threading.Lock()
+    enrichment_executor = ThreadPoolExecutor(
+        max_workers=max(1, int(config.get("background_enrichment_workers", 1))),
+        thread_name_prefix="capture-enrichment",
+    )
+
     class ObsidianBridgeHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
@@ -71,7 +82,7 @@ def handler_factory(config: dict):
             path = parsed_path.path
             query = parse_qs(parsed_path.query)
             fast = query.get("fast", ["0"])[0] == "1"
-            if path not in {"/captures", "/drafts", "/metadata", "/captures/delete"}:
+            if path not in {"/captures", "/drafts", "/metadata", "/captures/delete", "/captures/read"}:
                 self.write_error_json(404, "NOT_FOUND", f"Unknown endpoint: {path}")
                 return
             if not authorized(self.headers.get("Authorization"), config.get("token", "")):
@@ -83,8 +94,12 @@ def handler_factory(config: dict):
             try:
                 item = json.loads(payload.decode("utf-8"))
                 if path == "/captures/delete":
-                    result = delete_capture_note(config, item)
+                    with write_lock:
+                        result = delete_capture_note(config, item)
                     self.write_json(result)
+                    return
+                if path == "/captures/read":
+                    self.write_json({"ok": True, "item": read_capture_item(config, item)})
                     return
                 item = enrich_capture(config, item, fetch_remote_metadata=not fast)
                 if path == "/metadata":
@@ -93,16 +108,27 @@ def handler_factory(config: dict):
                 if path == "/drafts":
                     self.write_json(generate_markdown_draft(config, item))
                     return
-                note_path = write_capture_note(config, item)
-                rebuild_knowledge_synthesis(config)
+                with write_lock:
+                    note_path = write_capture_note(config, item)
+                    rebuild_knowledge_synthesis(config)
+                relative_path = note_path.relative_to(notes_root(config)).as_posix()
                 self.write_json(
                     {
                         "ok": True,
                         "path": str(note_path),
-                        "relativePath": note_path.relative_to(notes_root(config)).as_posix(),
+                        "relativePath": relative_path,
                         "item": item,
                     }
                 )
+                if fast and config.get("background_enrichment_enabled", True):
+                    pending_item = dict(item)
+                    pending_item["remoteNotePath"] = relative_path
+                    enrichment_executor.submit(
+                        enrich_capture_in_background,
+                        config,
+                        pending_item,
+                        write_lock,
+                    )
             except Exception as exc:
                 self.write_error_json(500, "BRIDGE_ERROR", str(exc))
 
@@ -267,6 +293,10 @@ def write_capture_note(config: dict, item: dict) -> Path:
         markdown = fallback_markdown(item)
     created = parse_date(item.get("createdAt")) or dt.datetime.now()
     remote_note_path = str(item.get("remoteNotePath") or "")
+    if not remote_note_path:
+        existing_note_path = find_note_path_by_capture_id(config, str(item.get("id") or ""))
+        if existing_note_path is not None:
+            remote_note_path = existing_note_path.relative_to(notes_root(config)).as_posix()
     if remote_note_path:
         root_for_indexes = notes_root(config).resolve()
         note_path = resolve_note_path(root_for_indexes, remote_note_path)
@@ -275,11 +305,189 @@ def write_capture_note(config: dict, item: dict) -> Path:
     else:
         filename = f"{created:%Y-%m-%d}-{slugify(title)}.md"
         note_path = unique_path(root / filename)
+    item["remoteNotePath"] = note_path.relative_to(notes_root(config)).as_posix()
     note_path.write_text(markdown.strip() + "\n", encoding="utf-8")
 
     raw_path = notes_root(config) / config.get("inbox_subdir", "00_Inbox") / f"{note_path.stem}.json"
     raw_path.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
     return note_path
+
+
+def find_note_path_by_capture_id(config: dict, capture_id: str) -> Path | None:
+    capture_id = capture_id.strip()
+    if not capture_id:
+        return None
+    root = notes_root(config).resolve()
+    inbox = root / config.get("inbox_subdir", "00_Inbox")
+    if not inbox.exists():
+        return None
+    for raw_path in inbox.glob("*.json"):
+        try:
+            stored = json.loads(raw_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if str(stored.get("id") or "") != capture_id:
+            continue
+        requested = str(stored.get("remoteNotePath") or "")
+        if requested:
+            candidate = resolve_note_path(root, requested)
+        else:
+            candidate = root / "10_Notes" / f"{raw_path.stem}.md"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def read_capture_item(config: dict, payload: dict) -> dict:
+    root = notes_root(config).resolve()
+    requested = str(payload.get("path") or payload.get("remoteNotePath") or "")
+    if not requested:
+        raise ValueError("Missing note path")
+
+    note_path = resolve_note_path(root, requested)
+    raw_path = root / config.get("inbox_subdir", "00_Inbox") / f"{note_path.stem}.json"
+    if not note_path.exists() or not raw_path.exists():
+        raise FileNotFoundError(f"Capture not found: {requested}")
+    item = json.loads(raw_path.read_text(encoding="utf-8"))
+    item["remoteNotePath"] = note_path.relative_to(root).as_posix()
+    return item
+
+
+def enrich_capture_in_background(config: dict, item: dict, write_lock: threading.Lock) -> None:
+    try:
+        metadata = fetch_metadata(config, str(item.get("url") or ""))
+        candidate = enrich_capture(
+            config,
+            item,
+            fetch_remote_metadata=False,
+            metadata_override=metadata,
+        )
+        generated = draft_for_automatic_processing(config, candidate)
+
+        with write_lock:
+            try:
+                latest = read_capture_item(config, item)
+            except FileNotFoundError:
+                return
+
+            merged = enrich_capture(
+                config,
+                latest,
+                fetch_remote_metadata=False,
+                metadata_override=metadata,
+            )
+            generated_tags = [str(tag) for tag in generated.get("tags") or [] if str(tag).strip()]
+            merged["tags"] = list(dict.fromkeys([*(merged.get("tags") or []), *generated_tags]))
+            merged["alternativeDrafts"] = generated.get("alternatives") or merged.get("alternativeDrafts") or []
+            if merged.get("isUserEdited") is not True:
+                merged["summary"] = generated.get("summary") or merged.get("summary")
+                merged["draftMarkdown"] = generated.get("markdown") or merged.get("draftMarkdown")
+            merged["backgroundEnrichedAt"] = dt.datetime.now(dt.timezone.utc).isoformat()
+            write_capture_note(config, merged)
+            rebuild_knowledge_synthesis(config)
+    except Exception as exc:
+        print(f"Background enrichment failed for {item.get('url')}: {exc}")
+
+
+def start_cloud_relay_worker(config: dict, write_lock: threading.Lock) -> threading.Thread | None:
+    root = cloud_relay_root(config)
+    if root is None:
+        return None
+    for subdir in ("Queue", "Processed", "Failed"):
+        (root / subdir).mkdir(parents=True, exist_ok=True)
+    worker = threading.Thread(
+        target=cloud_relay_loop,
+        args=(config, write_lock),
+        name="icloud-relay",
+        daemon=True,
+    )
+    worker.start()
+    print(f"iCloud relay watching: {root / 'Queue'}")
+    return worker
+
+
+def cloud_relay_loop(config: dict, write_lock: threading.Lock) -> None:
+    poll_seconds = max(2, int(config.get("cloud_relay_poll_seconds", 5)))
+    retry_after: dict[Path, float] = {}
+    while True:
+        root = cloud_relay_root(config)
+        if root is not None:
+            queue_dir = root / "Queue"
+            queue_dir.mkdir(parents=True, exist_ok=True)
+            for path in sorted(queue_dir.glob("*.json")):
+                if retry_after.get(path, 0) > time.monotonic():
+                    continue
+                try:
+                    process_cloud_relay_file(config, path, write_lock)
+                    retry_after.pop(path, None)
+                except Exception as exc:
+                    retry_after[path] = time.monotonic() + max(15, poll_seconds * 3)
+                    print(f"iCloud relay retry pending for {path.name}: {exc}")
+        time.sleep(poll_seconds)
+
+
+def process_cloud_relay_file(config: dict, queue_path: Path, write_lock: threading.Lock) -> dict:
+    root = cloud_relay_root(config)
+    if root is None:
+        raise ValueError("cloud_relay_dir is not configured")
+    queue_root = (root / "Queue").resolve()
+    resolved_queue_path = queue_path.resolve()
+    if queue_root not in resolved_queue_path.parents:
+        raise ValueError("Refusing to process a relay file outside Queue")
+
+    before = queue_path.stat()
+    item = json.loads(queue_path.read_text(encoding="utf-8"))
+    item_id = str(item.get("id") or "").strip()
+    if not item_id:
+        raise ValueError(f"Relay item has no id: {queue_path.name}")
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+
+    if str(item.get("status") or "") == "deleted":
+        with write_lock:
+            remote_path = str(item.get("remoteNotePath") or "")
+            if remote_path:
+                delete_capture_note(config, {"path": remote_path})
+        item["status"] = "deleted"
+        item["updatedAt"] = now
+        item["lastSyncedAt"] = now
+    else:
+        enriched = enrich_capture(config, item, fetch_remote_metadata=True)
+        generated = draft_for_automatic_processing(config, enriched)
+        generated_tags = [str(tag) for tag in generated.get("tags") or [] if str(tag).strip()]
+        enriched["tags"] = list(dict.fromkeys([*(enriched.get("tags") or []), *generated_tags]))
+        enriched["alternativeDrafts"] = generated.get("alternatives") or enriched.get("alternativeDrafts") or []
+        if enriched.get("isUserEdited") is not True:
+            enriched["summary"] = generated.get("summary") or enriched.get("summary")
+            enriched["draftMarkdown"] = generated.get("markdown") or enriched.get("draftMarkdown")
+        enriched["status"] = "synced"
+        enriched["syncError"] = None
+        enriched["lastSyncedAt"] = now
+        enriched["updatedAt"] = now
+        enriched["cloudRelayedAt"] = now
+        with write_lock:
+            write_capture_note(config, enriched)
+            rebuild_knowledge_synthesis(config)
+        item = enriched
+
+    processed_dir = root / "Processed"
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    processed_path = processed_dir / f"{item_id}.json"
+    temporary_path = processed_path.with_suffix(".json.tmp")
+    temporary_path.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary_path.replace(processed_path)
+
+    try:
+        after = queue_path.stat()
+        if after.st_mtime_ns == before.st_mtime_ns and after.st_size == before.st_size:
+            queue_path.unlink()
+    except FileNotFoundError:
+        pass
+    return item
+
+
+def cloud_relay_root(config: dict) -> Path | None:
+    value = str(config.get("cloud_relay_dir") or "").strip()
+    return Path(value).expanduser() if value else None
 
 
 def delete_capture_note(config: dict, payload: dict) -> dict:
@@ -335,9 +543,17 @@ def remove_note_from_indexes(root: Path, note_path: Path) -> None:
         path.write_text("\n".join(kept).rstrip() + "\n", encoding="utf-8")
 
 
-def enrich_capture(config: dict, item: dict, fetch_remote_metadata: bool = True) -> dict:
+def enrich_capture(
+    config: dict,
+    item: dict,
+    fetch_remote_metadata: bool = True,
+    metadata_override: dict | None = None,
+) -> dict:
     item = dict(item)
-    metadata = fetch_metadata(config, str(item.get("url") or "")) if fetch_remote_metadata else {}
+    if metadata_override is not None:
+        metadata = metadata_override
+    else:
+        metadata = fetch_metadata(config, str(item.get("url") or "")) if fetch_remote_metadata else {}
     if metadata:
         item["metadata"] = metadata
         if not item.get("title") or str(item.get("title", "")).endswith("收藏内容"):
@@ -724,6 +940,17 @@ def generate_markdown_draft(config: dict, item: dict) -> dict:
         ],
         "tags": item.get("tags") or [],
     }
+
+
+def draft_for_automatic_processing(config: dict, item: dict) -> dict:
+    if item.get("isUserEdited") is True:
+        return {
+            "summary": item.get("summary") or make_summary(item),
+            "markdown": item.get("draftMarkdown") or fallback_markdown(item),
+            "alternatives": item.get("alternativeDrafts") or [],
+            "tags": item.get("tags") or [],
+        }
+    return generate_markdown_draft(config, item)
 
 
 def generate_ai_markdown_draft(config: dict, item: dict) -> dict | None:

@@ -16,6 +16,8 @@ final class CaptureListModel {
     var lastError: String?
     var lastStatusMessage: String?
     var lastHealth: BridgeHealth?
+    var cloudRelayFolderName: String? = CloudRelayStore.folderName
+    var cloudRelayError: String?
 
     init() {
         bridgeAddress = CaptureSettingsStore.bridgeAddress
@@ -24,7 +26,19 @@ final class CaptureListModel {
     }
 
     func reload() {
-        items = CaptureFileStore.load()
+        guard CloudRelayStore.isConfigured else {
+            items = CaptureFileStore.load()
+            cloudRelayFolderName = nil
+            return
+        }
+        do {
+            items = try CaptureFileStore.reconcileCloudRelay()
+            cloudRelayFolderName = CloudRelayStore.folderName
+            cloudRelayError = nil
+        } catch {
+            items = CaptureFileStore.load()
+            cloudRelayError = error.localizedDescription
+        }
     }
 
     func clearLastError() {
@@ -142,6 +156,7 @@ final class CaptureListModel {
                     try await client.deleteRemoteNote(path: remoteNotePath)
                     items.remove(at: offset)
                     deletedIDs.insert(item.id)
+                    try? CloudRelayStore.removeQueuedItem(id: item.id)
                 } catch {
                     var pendingDelete = item
                     pendingDelete.status = .deleted
@@ -149,6 +164,7 @@ final class CaptureListModel {
                     pendingDelete.lastSyncAttemptAt = Date()
                     pendingDelete.updatedAt = pendingDelete.lastSyncAttemptAt ?? Date()
                     items[offset] = pendingDelete
+                    try? CloudRelayStore.enqueue(pendingDelete)
                     lastError = "已加入待删除队列：\(error.localizedDescription)"
                 }
             } else if item.status == .deleted {
@@ -156,6 +172,7 @@ final class CaptureListModel {
             } else {
                 items.remove(at: offset)
                 deletedIDs.insert(item.id)
+                try? CloudRelayStore.removeQueuedItem(id: item.id)
             }
         }
         persist(deletedIDs: deletedIDs)
@@ -256,6 +273,27 @@ final class CaptureListModel {
         } catch {
             lastError = "配对链接无效：\(error.localizedDescription)"
         }
+    }
+
+    func configureCloudRelay(folderURL: URL) {
+        do {
+            try CloudRelayStore.configure(folderURL: folderURL)
+            cloudRelayFolderName = CloudRelayStore.folderName
+            cloudRelayError = nil
+            for item in items where item.status != .synced {
+                try CloudRelayStore.enqueue(item)
+            }
+            lastStatusMessage = "iCloud 离线中转已启用"
+        } catch {
+            cloudRelayError = error.localizedDescription
+        }
+    }
+
+    func clearCloudRelay() {
+        CloudRelayStore.clear()
+        cloudRelayFolderName = nil
+        cloudRelayError = nil
+        lastStatusMessage = "iCloud 离线中转已关闭"
     }
 
     func regenerateDrafts(for item: CaptureItem) async -> CaptureItem {

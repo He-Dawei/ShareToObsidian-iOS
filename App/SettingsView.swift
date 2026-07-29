@@ -1,10 +1,12 @@
 import SwiftUI
 import UIKit
 import AppIntents
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Bindable var model: CaptureListModel
     @State private var pairingText = ""
+    @State private var isChoosingCloudRelayFolder = false
 
     var body: some View {
         NavigationStack {
@@ -50,6 +52,31 @@ struct SettingsView: View {
                     ShortcutsLink()
                 }
 
+                Section("电脑离线中转") {
+                    if let folderName = model.cloudRelayFolderName {
+                        LabeledContent("iCloud 文件夹", value: folderName)
+                    } else {
+                        LabeledContent("iCloud 文件夹", value: "未选择")
+                    }
+                    Button {
+                        isChoosingCloudRelayFolder = true
+                    } label: {
+                        Label("选择 iCloud 中转文件夹", systemImage: "folder.badge.plus")
+                    }
+                    if model.cloudRelayFolderName != nil {
+                        Button(role: .destructive) {
+                            model.clearCloudRelay()
+                        } label: {
+                            Label("关闭离线中转", systemImage: "xmark.icloud")
+                        }
+                    }
+                    if let relayError = model.cloudRelayError {
+                        Text(relayError)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
                 Section("状态") {
                     LabeledContent("总数", value: "\(model.items.count)")
                     LabeledContent("待同步", value: "\(model.items.filter { $0.status != .synced }.count)")
@@ -76,6 +103,20 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("同步设置")
+            .fileImporter(
+                isPresented: $isChoosingCloudRelayFolder,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                do {
+                    guard let folderURL = try result.get().first else {
+                        return
+                    }
+                    model.configureCloudRelay(folderURL: folderURL)
+                } catch {
+                    model.cloudRelayError = error.localizedDescription
+                }
+            }
         }
     }
 }

@@ -4,3 +4,4 @@ Bridge/pairing.*.txt
 Bridge/pairing.*.html
 Bridge/__pycache__/
 *.pyc
+.venv/

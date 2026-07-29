@@ -93,13 +93,18 @@ function New-TextFromCodePoints {
 $repoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 $configFullPath = Resolve-RepoPath $ConfigPath
 $config = Get-Content -LiteralPath $configFullPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$pythonPath = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+$pythonPath = Join-Path $repoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonPath)) {
-    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $pythonCommand) {
-        throw "Unable to find Python for bridge logic verification."
+    $legacyPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+    if (Test-Path -LiteralPath $legacyPython) {
+        $pythonPath = $legacyPython
+    } else {
+        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $pythonCommand) {
+            throw "Unable to find Python for bridge logic verification."
+        }
+        $pythonPath = $pythonCommand.Source
     }
-    $pythonPath = $pythonCommand.Source
 }
 
 if (-not $BaseUrl) {
@@ -135,13 +140,18 @@ if ($taskActionText.IndexOf($expectedBridgeDir, [System.StringComparison]::Ordin
 if ([string]$newTask.Settings.MultipleInstances -ne "IgnoreNew") {
     throw "ShareToObsidianBridge task MultipleInstances must be IgnoreNew."
 }
-$bridgePythonProcesses = Get-CimInstance Win32_Process |
+$bridgePythonProcesses = @(Get-CimInstance Win32_Process |
     Where-Object {
         $_.CommandLine -like "*python.exe*" -and
         $_.CommandLine -like "*obsidian_bridge.py*"
-    }
-if (($bridgePythonProcesses | Measure-Object).Count -ne 1) {
-    throw "Expected exactly one Python obsidian_bridge.py process."
+    })
+$isSingleServerProcess = $bridgePythonProcesses.Count -eq 1
+$isVenvLauncherPair = $bridgePythonProcesses.Count -eq 2 -and (
+    $bridgePythonProcesses[0].ParentProcessId -eq $bridgePythonProcesses[1].ProcessId -or
+    $bridgePythonProcesses[1].ParentProcessId -eq $bridgePythonProcesses[0].ProcessId
+)
+if (-not $isSingleServerProcess -and -not $isVenvLauncherPair) {
+    throw "Expected one Bridge server process (or one venv launcher/child pair), got $($bridgePythonProcesses.Count)."
 }
 Write-Host "Scheduled task check passed."
 
@@ -259,6 +269,15 @@ if (-not (Test-Path -LiteralPath $notePath)) {
 }
 Write-Host "Fast capture check passed: $($push.relativePath)"
 
+$readBack = Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/captures/read" -Body @{ path = $push.relativePath } -Headers $headers
+if (-not $readBack.ok -or -not $readBack.item -or $readBack.item.id -ne $payload.id) {
+    throw "Capture read endpoint did not return the stored item."
+}
+if ($readBack.item.remoteNotePath -ne $push.relativePath) {
+    throw "Capture read endpoint returned an unexpected remote note path."
+}
+Write-Host "Capture read-back check passed."
+
 $payload["remoteNotePath"] = $push.relativePath
 $payload["draftMarkdown"] = "# $title`n`n## $coreContent`n`nVerification overwrite update.`n"
 $overwrite = Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/captures" -Body $payload -Headers $headers
@@ -335,6 +354,7 @@ $requiredFiles = @(
     "ShareExtension\ShareExtension.entitlements",
     "Shared\CaptureItem.swift",
     "Shared\CaptureFileStore.swift",
+    "Shared\CloudRelayStore.swift",
     "Shared\CaptureSettingsStore.swift",
     "Shared\CaptureSyncRunner.swift",
     "Shared\SupportedShareURL.swift",
@@ -380,6 +400,8 @@ foreach ($needle in @(
     '"obsidian_vault"',
     '"notes_subdir"',
     '"metadata_timeout_seconds"',
+    '"cloud_relay_dir"',
+    '"cloud_relay_poll_seconds"',
     '"ai"'
 )) {
     if (-not $exampleConfigText.Contains($needle)) {
@@ -547,7 +569,9 @@ foreach ($needle in @(
     $verificationCaptureButtonText,
     "await model.createVerificationCapture()",
     "model.lastStatusMessage",
-    "statusMessage"
+    "statusMessage",
+    "allowedContentTypes: [.folder]",
+    "model.configureCloudRelay(folderURL: folderURL)"
 )) {
     if (-not $settingsViewText.Contains($needle)) {
         throw "SettingsView missing iPhone clipboard pairing import support: $needle"
@@ -696,6 +720,23 @@ foreach ($needle in @(
         throw "CaptureFileStore missing queue durability/deduplication logic: $needle"
     }
 }
+
+$cloudRelayStoreText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\CloudRelayStore.swift") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "bookmarkData",
+    "startAccessingSecurityScopedResource",
+    "NSFileCoordinator",
+    "static func enqueue",
+    "static func reconcile",
+    '"Queue"',
+    '"Processed"',
+    "JSONEncoder.captureEncoder",
+    "JSONDecoder.captureDecoder"
+)) {
+    if (-not $cloudRelayStoreText.Contains($needle)) {
+        throw "CloudRelayStore missing persistent iCloud relay behavior: $needle"
+    }
+}
 $duplicateQueuedPattern = [regex]::Escape("if let existingIndex = items.firstIndex") + "[\s\S]*?" + [regex]::Escape("if item.status == .queued") + "[\s\S]*?" + [regex]::Escape("existing.status = .queued") + "[\s\S]*?" + [regex]::Escape("existing.syncError = nil") + "[\s\S]*?" + [regex]::Escape("return existing")
 if (-not [regex]::IsMatch($captureFileStoreText, $duplicateQueuedPattern)) {
     throw "CaptureFileStore must requeue duplicate shared links before returning existing item."
@@ -712,7 +753,7 @@ $captureSyncRunnerText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\C
 foreach ($needle in @(
     "enrichSyncedMissingMetadata",
     "shouldEnrichSyncedItem",
-    "client.refreshMetadata",
+    "client.fetchRemoteCapture",
     "lastMetadataRefreshAttemptAt",
     "status == .deleted",
     "client.deleteRemoteNote",
@@ -724,7 +765,7 @@ foreach ($needle in @(
     "finalItems = merged",
     "return merged",
     "let queuedCount = finalItems.filter",
-    "items[index] = result.item ?? enriched",
+    "items[index] = remote",
     "items[index] = result.item ?? items[index]",
     "prioritizedIDs: [UUID] = []",
     "private static func prioritize",
@@ -738,6 +779,9 @@ foreach ($needle in @(
     "deletedIDs.contains(latest.id)",
     "merged.append(working)",
     "Task.isCancelled",
+    "CloudRelayStore.enqueue",
+    "CloudRelayStore.removeQueuedItem",
+    "CaptureFileStore.reconcileCloudRelay",
     "lastError ="
 )) {
     if (-not $captureSyncRunnerText.Contains($needle)) {
@@ -763,6 +807,10 @@ foreach ($needle in @(
     "UNAUTHORIZED",
     "BRIDGE_ERROR",
     "NOT_FOUND",
+    "/captures/read",
+    "enrich_capture_in_background",
+    "process_cloud_relay_file",
+    "start_cloud_relay_worker",
     "should_replace_summary",
     "ensure_agents_rules",
     "write_ai_learning_context",

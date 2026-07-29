@@ -3,12 +3,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Python = "C:\Users\44527\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+$PythonCandidates = @(
+    (Join-Path (Split-Path -Parent $ProjectDir) ".venv\Scripts\python.exe"),
+    (Join-Path $ProjectDir ".venv\Scripts\python.exe"),
+    "C:\Users\44527\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+)
+$Python = $PythonCandidates |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
 $Script = Join-Path $ProjectDir "obsidian_bridge.py"
 $Config = Join-Path $ProjectDir "bridge.config.json"
 
-if (-not (Test-Path -LiteralPath $Python)) {
-    throw "Python runtime not found: $Python"
+if (-not $Python) {
+    throw "Python runtime not found. Create $((Split-Path -Parent $ProjectDir))\.venv with uv venv."
 }
 if (-not (Test-Path -LiteralPath $Script)) {
     throw "Bridge script not found: $Script"
