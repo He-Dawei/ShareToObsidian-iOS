@@ -62,9 +62,12 @@ enum CaptureFileStore {
     static func append(_ item: CaptureItem) throws -> CaptureItem {
         try withFileLock {
             var items = loadUnlocked()
+            var item = item
+            item.url = canonicalURL(item.url)
             let itemKey = normalizedURLKey(item.url)
             if let existingIndex = items.firstIndex(where: { normalizedURLKey($0.url) == itemKey }) {
                 var existing = items.remove(at: existingIndex)
+                existing.url = item.url
                 if existing.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isPlaceholderTitle(existing) {
                     existing.title = item.title
                 }
@@ -124,7 +127,8 @@ enum CaptureFileStore {
     }
 
     private static func normalizedURLKey(_ url: URL) -> String {
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+        let canonical = canonicalURL(url)
+        guard var components = URLComponents(url: canonical, resolvingAgainstBaseURL: false) else {
             return url.absoluteString.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
@@ -172,6 +176,19 @@ enum CaptureFileStore {
             components.queryItems = nil
         }
         return components.string ?? url.absoluteString
+    }
+
+    private static func canonicalURL(_ url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = components.host?.lowercased(),
+              ["v.douyin.com", "b23.tv"].contains(host),
+              let shortCode = components.path.split(separator: "/").first else {
+            return url
+        }
+        components.path = "/\(shortCode)/"
+        components.query = nil
+        components.fragment = nil
+        return components.url ?? url
     }
 
     private static func isPlaceholderTitle(_ item: CaptureItem) -> Bool {

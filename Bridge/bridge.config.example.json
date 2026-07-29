@@ -22,7 +22,7 @@
     "platforms": ["douyin", "bilibili"],
     "ffmpeg_path": "C:/Users/44527/ffmpeg/bin/ffmpeg.exe",
     "download_timeout_seconds": 180,
-    "timeout_seconds": 1800,
+    "timeout_seconds": 3600,
     "max_chars": 12000,
     "command": []
   },

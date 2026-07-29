@@ -280,6 +280,7 @@ Write-Host "Capture read-back check passed."
 
 $payload["remoteNotePath"] = $push.relativePath
 $payload["draftMarkdown"] = "# $title`n`n## $coreContent`n`nVerification overwrite update.`n"
+$payload["updatedAt"] = (Get-Date).ToUniversalTime().AddSeconds(2).ToString("o")
 $overwrite = Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/captures" -Body $payload -Headers $headers
 if (-not $overwrite.ok -or $overwrite.relativePath -ne $push.relativePath) {
     throw "Expected overwrite to keep the same remote note path."
@@ -711,6 +712,9 @@ foreach ($needle in @(
 $captureFileStoreText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\CaptureFileStore.swift") -Raw -Encoding UTF8
 foreach ($needle in @(
     "normalizedURLKey",
+    "canonicalURL",
+    '"v.douyin.com", "b23.tv"',
+    "existing.url = item.url",
     "components.fragment = nil",
     "items.remove(at: existingIndex)",
     "FileManager.default.createDirectory",
@@ -846,10 +850,12 @@ foreach ($needle in @(
     "Counter(",
     "metadata.get(`"description`") and should_replace_summary",
     "item[`"draftMarkdown`"] = fallback_markdown(item)",
-    "remove_note_from_indexes(root_for_indexes, note_path)",
+    "remove_note_from_indexes(root, note_path)",
     "matches_domain(host",
     "content_text",
     "transcript_text",
+    "read_partial_transcript",
+    "ffmpeg:-ar 24000 -ac 1",
     "metadata.get('transcript')",
     "fetch_web_content",
     "Defuddle",

@@ -102,6 +102,8 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
                 if path == "/captures/read":
                     self.write_json({"ok": True, "item": read_capture_item(config, item)})
                     return
+                if path == "/captures":
+                    item = merge_incoming_capture(config, item)
                 item = enrich_capture(config, item, fetch_remote_metadata=not fast)
                 if path == "/metadata":
                     self.write_json(item)
@@ -126,7 +128,7 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
                         "item": item,
                     }
                 )
-                if config.get("background_enrichment_enabled", True):
+                if should_enqueue_background(config, item):
                     pending_item = dict(item)
                     pending_item["remoteNotePath"] = relative_path
                     enrichment_executor.submit(
@@ -329,7 +331,6 @@ def write_capture_note(config: dict, item: dict) -> Path:
     if remote_note_path:
         root_for_indexes = notes_root(config).resolve()
         note_path = resolve_note_path(root_for_indexes, remote_note_path)
-        remove_note_from_indexes(root_for_indexes, note_path)
         note_path.parent.mkdir(parents=True, exist_ok=True)
     else:
         filename = f"{created:%Y-%m-%d}-{slugify(title)}.md"
@@ -382,11 +383,95 @@ def read_capture_item(config: dict, payload: dict) -> dict:
     return item
 
 
+def merge_incoming_capture(config: dict, incoming: dict) -> dict:
+    stored = existing_capture_item(config, incoming)
+    if stored is None:
+        return dict(incoming)
+
+    incoming_updated = parse_date(incoming.get("updatedAt"))
+    stored_updated = parse_date(stored.get("updatedAt"))
+    if stored_updated and (incoming_updated is None or incoming_updated <= stored_updated):
+        return stored
+    if incoming.get("isUserEdited") is not True:
+        return stored
+
+    merged = dict(stored)
+    merged.update(incoming)
+    for field in (
+        "id",
+        "url",
+        "platform",
+        "createdAt",
+        "sourceApp",
+        "remoteNotePath",
+        "lastSyncedAt",
+        "backgroundEnrichedAt",
+        "backgroundTranscribedAt",
+        "backgroundTranscriptionFailedAt",
+    ):
+        if stored.get(field) is not None:
+            merged[field] = stored[field]
+    if incoming.get("metadata") is None and stored.get("metadata") is not None:
+        merged["metadata"] = stored["metadata"]
+    return merged
+
+
+def existing_capture_item(config: dict, item: dict) -> dict | None:
+    root = notes_root(config)
+    remote_note_path = str(item.get("remoteNotePath") or "")
+    note_path = None
+    if remote_note_path:
+        try:
+            note_path = resolve_note_path(root.resolve(), remote_note_path)
+        except ValueError:
+            return None
+    if note_path is None or not note_path.exists():
+        note_path = find_note_path_by_capture_id(config, str(item.get("id") or ""))
+    if note_path is None:
+        return None
+    raw_path = root / config.get("inbox_subdir", "00_Inbox") / f"{note_path.stem}.json"
+    if not raw_path.exists():
+        return None
+    try:
+        stored = json.loads(raw_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    stored["remoteNotePath"] = note_path.relative_to(root).as_posix()
+    return stored
+
+
+def should_enqueue_background(config: dict, item: dict) -> bool:
+    if not config.get("background_enrichment_enabled", True):
+        return False
+    metadata = item.get("metadata")
+    if not isinstance(metadata, dict) or not metadata or not item.get("backgroundEnrichedAt"):
+        return True
+    platform = str(item.get("platform") or detect_platform(str(item.get("url") or "")))
+    return (
+        should_transcribe_capture(config, metadata, platform)
+        and not item.get("backgroundTranscribedAt")
+        and not item.get("backgroundTranscriptionFailedAt")
+    )
+
+
+def should_retry_video_metadata(metadata: dict, platform: str) -> bool:
+    return (
+        platform.lower() in {"douyin", "bilibili", "xiaohongshu"}
+        and metadata.get("extractor") == "Defuddle"
+        and not metadata.get("duration")
+    )
+
+
 def enrich_capture_in_background(config: dict, item: dict, write_lock: threading.Lock) -> None:
     try:
+        platform = str(item.get("platform") or detect_platform(str(item.get("url") or "")))
         metadata = item.get("metadata")
         if not isinstance(metadata, dict) or not metadata:
             metadata = fetch_metadata(config, str(item.get("url") or ""))
+        elif should_retry_video_metadata(metadata, platform):
+            video_metadata, _ = fetch_ytdlp_metadata(config, str(item.get("url") or ""))
+            if video_metadata:
+                metadata = {**metadata, **video_metadata}
         candidate = enrich_capture(
             config,
             item,
@@ -401,7 +486,6 @@ def enrich_capture_in_background(config: dict, item: dict, write_lock: threading
             generated,
             write_lock,
         )
-        platform = str(item.get("platform") or detect_platform(str(item.get("url") or "")))
         if persisted is None or not should_transcribe_capture(config, metadata, platform):
             return
 
@@ -769,6 +853,8 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
             download_command.extend(["--ffmpeg-location", ffmpeg_path])
         download_command.extend(
             [
+                "--postprocessor-args",
+                "ffmpeg:-ar 24000 -ac 1",
                 "-x",
                 "--audio-format",
                 "wav",
@@ -805,6 +891,7 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
             str(part).replace("{audio}", values["audio"]).replace("{output}", values["output"])
             for part in command_template
         ]
+        max_chars = int(transcription.get("max_chars", config.get("content_max_chars", 12000)))
         try:
             transcribed = subprocess.run(
                 command,
@@ -814,6 +901,11 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
                 capture_output=True,
                 timeout=int(transcription.get("timeout_seconds", 1800)),
             )
+        except subprocess.TimeoutExpired:
+            partial = read_partial_transcript(output_path, max_chars)
+            if partial:
+                return partial, ""
+            return "", "本地转写超时，且没有可用的部分结果"
         except Exception as exc:
             return "", str(exc)
         if transcribed.returncode != 0:
@@ -822,8 +914,17 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
             return "", "转写命令未生成输出文件"
 
         transcript = output_path.read_text(encoding="utf-8", errors="replace").strip()
-        max_chars = int(transcription.get("max_chars", config.get("content_max_chars", 12000)))
         return transcript[:max_chars], ""
+
+
+def read_partial_transcript(output_path: Path, max_chars: int) -> str:
+    if not output_path.exists():
+        return ""
+    transcript = output_path.read_text(encoding="utf-8", errors="replace").strip()
+    if not transcript:
+        return ""
+    marker = "\n\n[本地转写达到时间上限，以上为已完成部分。]"
+    return (transcript + marker)[:max_chars]
 
 
 def should_transcribe_capture(config: dict, metadata: dict, platform: str) -> bool:

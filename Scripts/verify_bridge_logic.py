@@ -231,6 +231,51 @@ def main() -> int:
             assert completed["status"] == "synced"
             assert completed["lastSyncedAt"]
             assert completed["syncError"] is None
+            assert not bridge.should_enqueue_background(config, completed)
+
+            stale = dict(background_item)
+            stale["url"] = "https://example.com/stale-copy"
+            stale["summary"] = "旧手机摘要"
+            stale["updatedAt"] = "2026-07-29T01:00:00Z"
+            merged_stale = bridge.merge_incoming_capture(config, stale)
+            assert merged_stale["url"] == completed["url"]
+            assert merged_stale["summary"] == "后台 AI 摘要"
+            assert merged_stale["metadata"]["content_text"] == "后台正文"
+
+            newer_unedited = dict(completed)
+            newer_unedited["url"] = "https://example.com/newer-but-unedited"
+            newer_unedited["summary"] = "手机自动同步副本"
+            newer_unedited["metadata"] = {"description": "不完整元数据"}
+            newer_unedited["isUserEdited"] = False
+            newer_unedited["updatedAt"] = "2099-07-29T00:59:59Z"
+            merged_unedited = bridge.merge_incoming_capture(config, newer_unedited)
+            assert merged_unedited["url"] == completed["url"]
+            assert merged_unedited["summary"] == "后台 AI 摘要"
+            assert merged_unedited["metadata"]["content_text"] == "后台正文"
+
+            newer = dict(completed)
+            newer.pop("metadata", None)
+            newer["url"] = "https://example.com/user-cannot-change-source"
+            newer["summary"] = "手机最新编辑"
+            newer["draftMarkdown"] = "# 手机最新编辑稿"
+            newer["isUserEdited"] = True
+            newer["updatedAt"] = "2099-07-29T01:00:00Z"
+            merged_newer = bridge.merge_incoming_capture(config, newer)
+            assert merged_newer["summary"] == "手机最新编辑"
+            assert merged_newer["draftMarkdown"] == "# 手机最新编辑稿"
+            assert merged_newer["metadata"]["content_text"] == "后台正文"
+            assert merged_newer["remoteNotePath"] == relative_path
+            assert merged_newer["url"] == completed["url"]
+
+            video_pending = dict(completed)
+            video_pending["platform"] = "bilibili"
+            video_pending["metadata"] = {"content_text": "只有页面介绍。"}
+            video_pending.pop("backgroundTranscribedAt", None)
+            video_pending.pop("backgroundTranscriptionFailedAt", None)
+            config["transcription"] = {"enabled": True, "platforms": ["bilibili"]}
+            assert bridge.should_enqueue_background(config, video_pending)
+            video_pending["metadata"]["transcript"] = "已有视频转写。"
+            assert not bridge.should_enqueue_background(config, video_pending)
 
             completed["isUserEdited"] = True
             completed["summary"] = "用户摘要"
@@ -293,8 +338,18 @@ def main() -> int:
         assert not error
         assert transcript == "[00:00] 本地转写成功"
         assert len(commands) == 2
+        assert "--postprocessor-args" in commands[0]
+        assert "ffmpeg:-ar 24000 -ac 1" in commands[0]
         assert "--audio-format" in commands[0]
         assert commands[1][0] == "fake-asr"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        partial_path = Path(tmp) / "partial.txt"
+        partial_path.write_text("[00:00] 已完成的部分转写", encoding="utf-8")
+        partial = bridge.read_partial_transcript(partial_path, 12000)
+        assert partial.startswith("[00:00] 已完成的部分转写")
+        assert "时间上限" in partial
+        assert bridge.read_partial_transcript(Path(tmp) / "missing.txt", 12000) == ""
 
     transcription_config = {
         "transcription": {
@@ -315,6 +370,18 @@ def main() -> int:
     assert not bridge.should_transcribe_capture(
         transcription_config,
         {"content_text": "普通网页正文。"},
+        "web",
+    )
+    assert bridge.should_retry_video_metadata(
+        {"extractor": "Defuddle", "content_text": "页面介绍。"},
+        "bilibili",
+    )
+    assert not bridge.should_retry_video_metadata(
+        {"extractor": "BiliBili", "duration": 120},
+        "bilibili",
+    )
+    assert not bridge.should_retry_video_metadata(
+        {"extractor": "Defuddle", "content_text": "网页正文。"},
         "web",
     )
 

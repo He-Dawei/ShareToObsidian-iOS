@@ -27,6 +27,7 @@ def main() -> int:
         args.chunk_seconds,
     )
     transcripts: list[str] = []
+    output.write_text("", encoding="utf-8")
 
     for index, chunk in enumerate(chunks):
         result = run_asr(args, chunk)
@@ -39,6 +40,7 @@ def main() -> int:
         if text:
             timestamp = format_timestamp(index * args.chunk_seconds)
             transcripts.append(f"[{timestamp}] {text}")
+            output.write_text("\n".join(transcripts).strip() + "\n", encoding="utf-8")
 
     transcript = "\n".join(transcripts).strip()
     if not transcript:
