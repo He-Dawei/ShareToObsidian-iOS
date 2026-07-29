@@ -314,6 +314,7 @@ if ($LASTEXITCODE -ne 0) {
 $requiredFiles = @(
     "project.yml",
     "App\Info.plist",
+    "App\SaveToObsidianIntent.swift",
     "App\CaptureThumbnailView.swift",
     "App\ShareToObsidianApp.swift",
     "App\BackgroundSyncScheduler.swift",
@@ -889,6 +890,30 @@ foreach ($needle in @(
     }
 }
 
+$saveIntentText = Get-Content -LiteralPath (Join-Path $repoRoot "App\SaveToObsidianIntent.swift") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "import AppIntents",
+    "struct SaveToObsidianIntent: AppIntent",
+    "inputConnectionBehavior: .connectToPreviousIntentResult",
+    "var sharedText: String",
+    "SupportedShareURL.isSupported",
+    "CaptureFileStore.append(item)",
+    "CaptureSyncRunner.syncQueued",
+    "maxItems: 1",
+    "fast: true",
+    "prioritizedIDs: [savedItem.id]",
+    "struct ShareToObsidianShortcuts: AppShortcutsProvider",
+    "SaveToObsidianIntent()"
+)) {
+    if (-not $saveIntentText.Contains($needle)) {
+        throw "SaveToObsidianIntent missing expected shortcut behavior: $needle"
+    }
+}
+$settingsViewText = Get-Content -LiteralPath (Join-Path $repoRoot "App\SettingsView.swift") -Raw -Encoding UTF8
+if (-not $settingsViewText.Contains("import AppIntents") -or -not $settingsViewText.Contains("ShortcutsLink()")) {
+    throw "SettingsView must expose the app's Shortcuts page."
+}
+
 $contentViewText = Get-Content -LiteralPath (Join-Path $repoRoot "App\ContentView.swift") -Raw -Encoding UTF8
 foreach ($needle in @(
     "model.lastError",
@@ -1068,6 +1093,7 @@ $swiftTextToScan = @(
     "App\CaptureListModel.swift",
     "App\CaptureEditorView.swift",
     "App\SettingsView.swift",
+    "App\SaveToObsidianIntent.swift",
     "Shared\CaptureItem.swift",
     "Shared\CaptureFileStore.swift",
     "Shared\CaptureSyncRunner.swift",

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AppIntents
 
 struct SettingsView: View {
     @Bindable var model: CaptureListModel
@@ -43,6 +44,10 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(pairingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                Section("快捷指令") {
+                    ShortcutsLink()
                 }
 
                 Section("状态") {

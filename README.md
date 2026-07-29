@@ -140,7 +140,16 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\download_latest_standalone.ps
 
 说明：Windows 不支持 AirDrop。可用 iCloud Drive、微信文件传输、LocalSend、数据线文件共享等方式把 IPA 传到 iPhone。
 
-standalone 版本不包含原生系统分享扩展，但支持 URL Scheme，可以配合 iOS 快捷指令从分享面板保存链接。
+standalone 版本不包含原生系统分享扩展，但内置 App Intent 和 URL Scheme，可以配合 iOS 快捷指令从分享面板保存链接。
+
+推荐用内置 App Intent：
+
+1. 打开 ShareToObsidian 的“同步”页，点“快捷指令”。
+2. 在快捷指令中使用 `保存到 Obsidian` 动作。
+3. 把动作的“链接或分享文本”设为“快捷指令输入”。
+4. 打开快捷指令详情，启用“在共享表单中显示”，接收 URL 和文本。
+
+之后在抖音、哔哩哔哩、Safari 等平台点分享，选择这个快捷指令即可。动作会提取分享内容里的第一个 http/https 链接，写入离线队列，并立即尝试同步。
 
 URL Scheme：
 
@@ -155,7 +164,7 @@ sharetoobsidian://add?url=...
 sharetoobsidian://share?text=...
 ```
 
-iOS 快捷指令建议：
+URL Scheme 备用快捷指令：
 
 1. 新建快捷指令，开启“在共享表单中显示”。
 2. 接收“URL”和“文本”。

@@ -77,6 +77,16 @@ fi
 
 echo "Source plist and entitlement checks passed."
 
+if ! grep -q "struct SaveToObsidianIntent: AppIntent" App/SaveToObsidianIntent.swift; then
+  echo "Missing SaveToObsidian App Intent." >&2
+  exit 1
+fi
+
+if ! grep -q "struct ShareToObsidianShortcuts: AppShortcutsProvider" App/SaveToObsidianIntent.swift; then
+  echo "Missing ShareToObsidian App Shortcuts provider." >&2
+  exit 1
+fi
+
 xcodegen generate
 
 if [[ ! -d "$PROJECT_NAME.xcodeproj" ]]; then
