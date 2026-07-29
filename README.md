@@ -19,7 +19,9 @@
 - Markdown 草稿生成器
 - 多平台链接识别
 - Windows Obsidian bridge
-- 桥接器自动补元数据：标题、作者/频道、简介、封面、播放量等，失败不阻塞入库
+- 桥接器自动补元数据：抖音/B站等视频优先走 yt-dlp，普通网页/微信文章优先走 Defuddle 提取干净 Markdown 正文，失败不阻塞入库
+- yt-dlp 使用稳定安装目录并可读取登录 cookie，不再依赖会被清理的 Codex runtime 缓存
+- 同一链接会去掉 `utm_*`、`spm_id_from`、`vd_source` 等追踪参数后查重，避免重复入库
 - App 启动和回到前台时自动检查桥接器并补同步待处理队列
 - App 进入后台时注册 iOS Background App Refresh，同步失败队列会在系统允许的后台唤醒中继续重试
 - App 支持保存 Bridge URL / Token，并可手动检查连接
@@ -30,6 +32,7 @@
 - Share Extension 保存分享后会用 fast 模式立即尝试同步最多 3 条待处理队列；fast 模式跳过耗时元数据提取，电脑不在线时保留队列，之后由 App 补同步
 - App 删除已同步内容时会调用 Bridge 把 Obsidian 笔记和原始 JSON 移入 `80_Trash`
 - 桥接器支持 OpenAI/Anthropic 兼容的 AI 文案生成；DeepSeek 可直接读取 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`ANTHROPIC_AUTH_TOKEN`，失败时自动回退本地模板
+- AI 生成标签时优先复用 Vault 已有标签，减少知识分类不断分叉
 - Obsidian 自动维护 `收藏知识框架.md`、`平台索引.md`、`标签索引.md`
 - Obsidian 自动生成 `收藏主题地图.md`、`收藏复习问题.md`、`收藏行动池.md`
 - XcodeGen `project.yml`
@@ -79,6 +82,20 @@ cd .\Bridge
 .\write_pairing_config.ps1 -RotateToken
 .\export_pairing_for_iphone.ps1
 ```
+
+正文提取依赖：
+
+```powershell
+npm install -g defuddle
+```
+
+Windows 版 yt-dlp 建议放到稳定路径，例如：
+
+```text
+C:\Users\44527\tools\yt-dlp\yt-dlp.exe
+```
+
+处理顺序保持轻量优先：平台原生元数据/字幕 → Defuddle 网页正文 → 本地模板；只有没有字幕且确实需要口播全文时，再启用本地语音转写。
 
 ## 当前手机配对方式
 

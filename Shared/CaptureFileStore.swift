@@ -116,10 +116,46 @@ enum CaptureFileStore {
 
         components.scheme = components.scheme?.lowercased()
         components.host = components.host?.lowercased()
+        if let host = components.host, host.hasPrefix("www.") {
+            components.host = String(host.dropFirst(4))
+        }
         components.fragment = nil
         if components.path.count > 1 {
             components.path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             components.path = "/" + components.path
+        }
+        let trackingNames: Set<String> = [
+            "from",
+            "share_app_name",
+            "share_medium",
+            "share_plat",
+            "share_session_id",
+            "share_source",
+            "share_tag",
+            "social_share_type",
+            "spm_id_from",
+            "timestamp",
+            "unique_k",
+            "utm_campaign",
+            "utm_content",
+            "utm_medium",
+            "utm_source",
+            "utm_term",
+            "vd_source"
+        ]
+        components.queryItems = components.queryItems?
+            .filter { item in
+                let name = item.name.lowercased()
+                return !trackingNames.contains(name) && !name.hasPrefix("utm_")
+            }
+            .sorted { lhs, rhs in
+                if lhs.name == rhs.name {
+                    return (lhs.value ?? "") < (rhs.value ?? "")
+                }
+                return lhs.name < rhs.name
+            }
+        if components.queryItems?.isEmpty == true {
+            components.queryItems = nil
         }
         return components.string ?? url.absoluteString
     }

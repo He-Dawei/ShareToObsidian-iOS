@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import datetime as dt
-from html import escape as html_escape
+from html import escape as html_escape, unescape as html_unescape
 from ipaddress import ip_address
 import json
 import os
@@ -362,9 +362,31 @@ def enrich_capture(config: dict, item: dict, fetch_remote_metadata: bool = True)
 def fetch_metadata(config: dict, url: str) -> dict:
     if not url:
         return {}
+    platform = detect_platform(url)
+    if platform in {"web", "wechat"}:
+        web_metadata, web_error = fetch_web_content(config, url)
+        if web_metadata:
+            return web_metadata
+    else:
+        web_error = ""
+
+    video_metadata, video_error = fetch_ytdlp_metadata(config, url)
+    if video_metadata:
+        return video_metadata
+
+    if platform not in {"web", "wechat"}:
+        web_metadata, web_error = fetch_web_content(config, url)
+        if web_metadata:
+            return web_metadata
+
+    error = (web_error or video_error) if platform in {"web", "wechat"} else (video_error or web_error)
+    return {"metadata_error": error} if error else {}
+
+
+def fetch_ytdlp_metadata(config: dict, url: str) -> tuple[dict, str]:
     ytdlp = find_ytdlp(config)
     if not ytdlp:
-        return {}
+        return {}, "yt-dlp 未安装或路径无效"
     cmd = [
         ytdlp,
         "--dump-single-json",
@@ -373,8 +395,11 @@ def fetch_metadata(config: dict, url: str) -> dict:
         "--no-warnings",
         "--socket-timeout",
         str(config.get("metadata_socket_timeout", 12)),
-        url,
     ]
+    cookies_file = find_cookies_file(config)
+    if cookies_file:
+        cmd.extend(["--cookies", cookies_file])
+    cmd.append(url)
     try:
         result = subprocess.run(
             cmd,
@@ -385,14 +410,66 @@ def fetch_metadata(config: dict, url: str) -> dict:
             timeout=int(config.get("metadata_timeout_seconds", 25)),
         )
     except Exception as exc:
-        return {"metadata_error": str(exc)}
+        return {}, str(exc)
     if result.returncode != 0:
-        return {"metadata_error": result.stderr.strip()[-500:]}
+        return {}, result.stderr.strip()[-500:]
     try:
         raw = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        return {"metadata_error": str(exc)}
-    return compact_metadata(raw)
+        return {}, str(exc)
+    return compact_metadata(raw, config), ""
+
+
+def fetch_web_content(config: dict, url: str) -> tuple[dict, str]:
+    defuddle = find_defuddle(config)
+    if not defuddle:
+        return {}, "Defuddle 未安装或路径无效"
+    cmd = [
+        defuddle,
+        "parse",
+        url,
+        "--markdown",
+        "--json",
+        "--user-agent",
+        str(
+            config.get(
+                "web_user_agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+            )
+        ),
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=int(config.get("content_timeout_seconds", 30)),
+        )
+    except Exception as exc:
+        return {}, str(exc)
+    if result.returncode != 0:
+        return {}, result.stderr.strip()[-500:]
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return {}, str(exc)
+
+    content = str(raw.get("content") or "").strip()
+    max_chars = int(config.get("content_max_chars", 12000))
+    metadata = {
+        "title": raw.get("title"),
+        "description": raw.get("description"),
+        "uploader": raw.get("author"),
+        "thumbnail": raw.get("image"),
+        "webpage_url": url,
+        "extractor": "Defuddle",
+        "content_text": content[:max_chars],
+    }
+    compact = {key: value for key, value in metadata.items() if value not in (None, "")}
+    return compact, ""
 
 
 def find_ytdlp(config: dict) -> str:
@@ -400,6 +477,7 @@ def find_ytdlp(config: dict) -> str:
     candidates = [
         configured,
         shutil.which("yt-dlp"),
+        Path.home() / "tools" / "yt-dlp" / "yt-dlp.exe",
         r"C:\Users\44527\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Scripts\yt-dlp.exe",
     ]
     for candidate in candidates:
@@ -408,7 +486,27 @@ def find_ytdlp(config: dict) -> str:
     return ""
 
 
-def compact_metadata(raw: dict) -> dict:
+def find_defuddle(config: dict) -> str:
+    configured = config.get("defuddle_path")
+    candidates = [
+        configured,
+        shutil.which("defuddle"),
+        Path.home() / "AppData" / "Roaming" / "npm" / "defuddle.cmd",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return str(candidate)
+    return ""
+
+
+def find_cookies_file(config: dict) -> str:
+    configured = config.get("cookies_file")
+    if configured and Path(configured).exists():
+        return str(Path(configured))
+    return ""
+
+
+def compact_metadata(raw: dict, config: dict | None = None) -> dict:
     keys = [
         "title",
         "description",
@@ -423,7 +521,176 @@ def compact_metadata(raw: dict) -> dict:
         "transcript",
         "content_text",
     ]
-    return {key: raw.get(key) for key in keys if raw.get(key) not in (None, "")}
+    metadata = {key: raw.get(key) for key in keys if raw.get(key) not in (None, "")}
+    transcript = extract_subtitle_text(
+        raw,
+        timeout=int((config or {}).get("subtitle_timeout_seconds", 15)),
+        max_chars=int((config or {}).get("content_max_chars", 12000)),
+    )
+    if transcript:
+        metadata["transcript"] = transcript
+    return metadata
+
+
+def extract_subtitle_text(raw: dict, timeout: int = 15, max_chars: int = 12000) -> str:
+    subtitle_groups = [
+        raw.get("subtitles") or {},
+        raw.get("automatic_captions") or {},
+    ]
+    for group in subtitle_groups:
+        languages = sorted(group.keys(), key=subtitle_language_priority)
+        for language in languages:
+            entries = sorted(
+                group.get(language) or [],
+                key=lambda entry: subtitle_format_priority(str(entry.get("ext") or "")),
+            )
+            for entry in entries:
+                text = subtitle_entry_text(entry, raw, timeout)
+                if text:
+                    return text[:max_chars]
+    return ""
+
+
+def subtitle_language_priority(language: str) -> tuple[int, str]:
+    value = language.lower()
+    if value in {"zh-cn", "zh-hans"}:
+        return 0, value
+    if value == "zh":
+        return 1, value
+    if "zh" in value:
+        return 2, value
+    if value in {"en", "en-us", "en-gb"}:
+        return 10, value
+    if "en" in value:
+        return 11, value
+    return 50, value
+
+
+def subtitle_format_priority(extension: str) -> int:
+    order = {"json": 0, "json3": 1, "srv3": 2, "vtt": 3, "srt": 4}
+    return order.get(extension.lower(), 20)
+
+
+def subtitle_entry_text(entry: dict, raw: dict, timeout: int) -> str:
+    data = entry.get("data")
+    if isinstance(data, str) and data.strip():
+        return parse_subtitle_payload(data)
+
+    url = str(entry.get("url") or "").strip()
+    if not url:
+        return ""
+    if url.startswith("//"):
+        url = "https:" + url
+    headers = {}
+    for key, value in (raw.get("http_headers") or {}).items():
+        if key.lower() in {"user-agent", "referer", "accept-language"}:
+            headers[str(key)] = str(value)
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = response.read().decode("utf-8", errors="replace")
+    except (OSError, urllib.error.URLError):
+        return ""
+    return parse_subtitle_payload(payload)
+
+
+def parse_subtitle_payload(payload: str) -> str:
+    value = payload.strip().lstrip("\ufeff")
+    if not value:
+        return ""
+    if value.startswith("{"):
+        try:
+            data = json.loads(value)
+        except json.JSONDecodeError:
+            data = {}
+        body = data.get("body") or []
+        if isinstance(body, list) and body:
+            lines = [
+                timed_subtitle_line(item.get("from"), item.get("content"))
+                for item in body
+                if isinstance(item, dict)
+            ]
+            return join_subtitle_lines(lines)
+        events = data.get("events") or []
+        if isinstance(events, list):
+            lines = []
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                text = "".join(
+                    str(segment.get("utf8") or "")
+                    for segment in event.get("segs") or []
+                    if isinstance(segment, dict)
+                )
+                lines.append(timed_subtitle_line(float(event.get("tStartMs") or 0) / 1000, text))
+            return join_subtitle_lines(lines)
+    return parse_text_subtitles(value)
+
+
+def parse_text_subtitles(payload: str) -> str:
+    lines = []
+    timestamp = ""
+    for raw_line in payload.splitlines():
+        line = raw_line.strip()
+        if not line or line == "WEBVTT" or line.isdigit():
+            continue
+        if "-->" in line:
+            timestamp = normalize_subtitle_timestamp(line.split("-->", 1)[0].strip())
+            continue
+        if line.startswith(("NOTE", "STYLE", "REGION", "Kind:", "Language:")):
+            continue
+        text = html_unescape(re.sub(r"<[^>]+>", "", line)).strip()
+        if text:
+            lines.append(f"[{timestamp}] {text}" if timestamp else text)
+    return join_subtitle_lines(lines)
+
+
+def normalize_subtitle_timestamp(value: str) -> str:
+    parts = value.replace(",", ".").split(":")
+    try:
+        seconds = float(parts[-1])
+        if len(parts) >= 2:
+            seconds += int(parts[-2]) * 60
+        if len(parts) >= 3:
+            seconds += int(parts[-3]) * 3600
+    except (ValueError, IndexError):
+        return value
+    return format_subtitle_timestamp(seconds)
+
+
+def timed_subtitle_line(seconds: object, content: object) -> str:
+    text = str(content or "").strip()
+    if not text:
+        return ""
+    try:
+        timestamp = format_subtitle_timestamp(float(seconds or 0))
+    except (TypeError, ValueError):
+        timestamp = ""
+    return f"[{timestamp}] {text}" if timestamp else text
+
+
+def format_subtitle_timestamp(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def join_subtitle_lines(lines: list[str]) -> str:
+    result = []
+    previous_text = ""
+    for line in lines:
+        value = str(line or "").strip()
+        if not value:
+            continue
+        plain_text = re.sub(r"^\[[^\]]+\]\s*", "", value)
+        if plain_text == previous_text:
+            continue
+        result.append(value)
+        previous_text = plain_text
+    return "\n".join(result)
 
 
 def should_replace_draft(markdown: str, item: dict) -> bool:
@@ -475,7 +742,7 @@ def generate_ai_markdown_draft(config: dict, item: dict) -> dict | None:
     base_url = ai_value(ai, "base_url", default_base_url).rstrip("/")
     model = ai_value(ai, "model", default_model)
     timeout = int(ai.get("timeout_seconds", 45))
-    prompt = ai_prompt(item)
+    prompt = ai_prompt(config, item)
     system_prompt = "你是帮助用户整理 Obsidian 收藏笔记的中文知识管理助手。只输出严格 JSON。"
 
     if provider == "anthropic":
@@ -580,15 +847,17 @@ def parse_ai_draft(content: str, item: dict) -> dict | None:
     return draft
 
 
-def ai_prompt(item: dict) -> str:
+def ai_prompt(config: dict, item: dict) -> str:
     metadata = item.get("metadata") or {}
     tags = ", ".join(str(tag) for tag in item.get("tags") or [])
+    existing_tags = ", ".join(existing_vault_tags(config))
     return (
         "请根据下面的分享内容，生成 Obsidian Markdown 草稿。\n"
         "要求：中文、结构化、适合后续 Codex/Claude 继续学习；不要编造具体视频事实；没有信息就写待补充。\n"
         "输出严格 JSON，字段为 summary, markdown, alternatives, tags。\n"
         "markdown 主稿必须包含“## 核心内容”“## 视频介绍”“## 后续行动”三个二级标题。\n"
         "alternatives 必须正好 3 个 Markdown 字符串，分别偏行动清单、知识卡片、问题驱动。\n\n"
+        f"知识库已有标签（优先复用，确有必要才新增）：{existing_tags or '暂无'}\n"
         f"标题：{item.get('title') or ''}\n"
         f"平台：{item.get('platform') or ''}\n"
         f"链接：{item.get('url') or ''}\n"
@@ -598,6 +867,25 @@ def ai_prompt(item: dict) -> str:
         f"简介：{metadata.get('description') or ''}\n"
         f"口播/转写：{metadata.get('transcript') or metadata.get('content_text') or ''}\n"
     )
+
+
+def existing_vault_tags(config: dict, limit: int = 40) -> list[str]:
+    if not config.get("obsidian_vault"):
+        return []
+    inbox = notes_root(config) / config.get("inbox_subdir", "00_Inbox")
+    counts: Counter[str] = Counter()
+    if not inbox.exists():
+        return []
+    for path in inbox.glob("*.json"):
+        try:
+            item = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for tag in item.get("tags") or []:
+            value = str(tag).strip()
+            if value:
+                counts[value] += 1
+    return [tag for tag, _ in counts.most_common(limit)]
 
 
 def extract_json_object(value: str) -> str:

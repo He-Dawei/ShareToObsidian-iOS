@@ -775,6 +775,13 @@ foreach ($needle in @(
     "content_text",
     "transcript_text",
     "metadata.get('transcript')",
+    "fetch_web_content",
+    "Defuddle",
+    "extract_subtitle_text",
+    "subtitle_language_priority",
+    "format_subtitle_timestamp",
+    "existing_vault_tags",
+    "existing_tags",
     "iesdouyin.com",
     "bili2233.cn",
     "placeholder_markers",
@@ -782,6 +789,18 @@ foreach ($needle in @(
 )) {
     if (-not $bridgeText.Contains($needle)) {
         throw "Bridge missing placeholder summary replacement support: $needle"
+    }
+}
+
+foreach ($needle in @(
+    "utm_source",
+    "spm_id_from",
+    "vd_source",
+    "components.queryItems = components.queryItems?",
+    ".sorted { lhs, rhs in"
+)) {
+    if (-not $captureFileStoreText.Contains($needle)) {
+        throw "CaptureFileStore missing tracking-aware URL deduplication: $needle"
     }
 }
 

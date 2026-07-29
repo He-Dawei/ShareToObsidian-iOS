@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +58,89 @@ def main() -> int:
     assert bridge.detect_platform("https://b23.tv/abc") == "bilibili"
     assert bridge.detect_platform("https://xhslink.com/a") == "xiaohongshu"
     assert bridge.detect_platform("https://mp.weixin.qq.com/s/a") == "wechat"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        defuddle = Path(tmp) / "defuddle.cmd"
+        defuddle.write_text("@echo off\n", encoding="utf-8")
+        original_run = bridge.subprocess.run
+        captured_command = []
+
+        def fake_defuddle_run(command, **_kwargs):
+            captured_command.extend(command)
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "title": "Defuddle 标题",
+                        "description": "网页摘要",
+                        "author": "网页作者",
+                        "image": "https://example.com/cover.jpg",
+                        "content": "正文内容 " * 20,
+                    },
+                    ensure_ascii=False,
+                ),
+                stderr="",
+            )
+
+        try:
+            bridge.subprocess.run = fake_defuddle_run
+            web_metadata, web_error = bridge.fetch_web_content(
+                {
+                    "defuddle_path": str(defuddle),
+                    "content_max_chars": 24,
+                },
+                "https://example.com/article",
+            )
+        finally:
+            bridge.subprocess.run = original_run
+
+        assert not web_error
+        assert web_metadata["title"] == "Defuddle 标题"
+        assert web_metadata["uploader"] == "网页作者"
+        assert web_metadata["extractor"] == "Defuddle"
+        assert len(web_metadata["content_text"]) == 24
+        assert captured_command[:3] == [
+            str(defuddle),
+            "parse",
+            "https://example.com/article",
+        ]
+        assert "--markdown" in captured_command
+        assert "--json" in captured_command
+
+    subtitle_metadata = bridge.compact_metadata(
+        {
+            "title": "字幕视频",
+            "subtitles": {
+                "en": [
+                    {
+                        "ext": "vtt",
+                        "data": "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nEnglish subtitle",
+                    }
+                ],
+                "zh-CN": [
+                    {
+                        "ext": "json",
+                        "data": json.dumps(
+                            {
+                                "body": [
+                                    {"from": 1.2, "to": 2.8, "content": "第一句字幕"},
+                                    {"from": 65.0, "to": 67.0, "content": "第二句字幕"},
+                                ]
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                ],
+            },
+        },
+        {"content_max_chars": 200},
+    )
+    assert "[00:01] 第一句字幕" in subtitle_metadata["transcript"]
+    assert "[01:05] 第二句字幕" in subtitle_metadata["transcript"]
+    assert "English subtitle" not in subtitle_metadata["transcript"]
+    assert bridge.parse_subtitle_payload(
+        "WEBVTT\n\n00:00:03.000 --> 00:00:05.000\n<b>VTT 字幕</b>"
+    ) == "[00:03] VTT 字幕"
 
     ai_item = {
         "url": "https://example.com/ai-draft",
@@ -227,6 +311,11 @@ def main() -> int:
         assert "[[10_Notes/sample]]" in tag_text
         agents_text = (root / "AGENTS.md").read_text(encoding="utf-8")
         assert "AI学习上下文.md" in agents_text
+        config = {"obsidian_vault": tmp, "notes_subdir": "移动收藏"}
+        assert bridge.existing_vault_tags(config)[:3] == ["移动收藏", "douyin", "视频"]
+        prompt = bridge.ai_prompt(config, ai_item)
+        assert "知识库已有标签" in prompt
+        assert "douyin" in prompt
     print("bridge-enrich-placeholder-draft-ok")
     return 0
 
