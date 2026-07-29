@@ -59,7 +59,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "移动收藏"
         notes = root / "10_Notes"
+        inbox = root / "00_Inbox"
         notes.mkdir(parents=True)
+        inbox.mkdir(parents=True)
         note = notes / "sample.md"
         note.write_text(
             "---\n"
@@ -72,7 +74,25 @@ def main() -> int:
             "#移动收藏 #douyin #视频\n",
             encoding="utf-8",
         )
+        (inbox / "sample.json").write_text(
+            """
+            {
+              "url": "https://v.douyin.com/sample",
+              "platform": "douyin",
+              "title": "示例收藏",
+              "summary": "这是用于验证 AI 学习上下文的摘要。",
+              "tags": ["移动收藏", "douyin", "视频"],
+              "createdAt": "2026-07-29T08:00:00Z"
+            }
+            """,
+            encoding="utf-8",
+        )
         bridge.ensure_vault_layout({"obsidian_vault": tmp, "notes_subdir": "移动收藏"})
+        stale_framework = root / "90_Knowledge" / "收藏知识框架.md"
+        stale_framework.write_text(
+            "# 收藏知识框架\n\n## 最近入库\n\n- [[10_Notes/deleted-verifier]] - stale\n",
+            encoding="utf-8",
+        )
         bridge.rebuild_knowledge_synthesis({"obsidian_vault": tmp, "notes_subdir": "移动收藏"})
         ai_context = root / "90_Knowledge" / "AI学习上下文.md"
         assert ai_context.exists()
@@ -80,6 +100,17 @@ def main() -> int:
         assert "Codex/Claude" in ai_text
         assert "[[10_Notes/sample]]" in ai_text
         assert "#douyin" in ai_text
+        assert "`douyin` 1" in ai_text
+        framework_text = stale_framework.read_text(encoding="utf-8")
+        assert "deleted-verifier" not in framework_text
+        assert framework_text.count("[[10_Notes/sample]]") == 1
+        assert "2026-07-29" in framework_text
+        platform_text = (root / "90_Knowledge" / "平台索引.md").read_text(encoding="utf-8")
+        assert "## douyin" in platform_text
+        assert "[[10_Notes/sample]]" in platform_text
+        tag_text = (root / "90_Knowledge" / "标签索引.md").read_text(encoding="utf-8")
+        assert "## 视频" in tag_text
+        assert "[[10_Notes/sample]]" in tag_text
         agents_text = (root / "AGENTS.md").read_text(encoding="utf-8")
         assert "AI学习上下文.md" in agents_text
     print("bridge-enrich-placeholder-draft-ok")

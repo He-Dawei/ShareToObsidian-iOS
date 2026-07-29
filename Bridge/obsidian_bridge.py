@@ -90,7 +90,6 @@ def handler_factory(config: dict):
                     self.write_json(generate_markdown_draft(config, item))
                     return
                 note_path = write_capture_note(config, item)
-                update_framework(config, item, note_path)
                 rebuild_knowledge_synthesis(config)
                 self.write_json(
                     {
@@ -330,33 +329,6 @@ def remove_note_from_indexes(root: Path, note_path: Path) -> None:
         lines = path.read_text(encoding="utf-8").splitlines()
         kept = [line for line in lines if wiki not in line and rel not in line]
         path.write_text("\n".join(kept).rstrip() + "\n", encoding="utf-8")
-
-
-def update_framework(config: dict, item: dict, note_path: Path) -> None:
-    root = notes_root(config)
-    framework_path = root / config.get("framework_file", "90_Knowledge/收藏知识框架.md")
-    framework_path.parent.mkdir(parents=True, exist_ok=True)
-
-    title = str(item.get("title") or note_path.stem)
-    platform = str(item.get("platform") or "unknown")
-    tags = item.get("tags") or []
-    tag_text = " ".join(f"#{tag}" for tag in tags)
-    rel = note_path.relative_to(root).as_posix()
-    line = f"- {dt.date.today().isoformat()} [[{rel[:-3]}]] `{platform}` {tag_text} - {title}\n"
-
-    if framework_path.exists() and line in framework_path.read_text(encoding="utf-8"):
-        return
-
-    if not framework_path.exists():
-        framework_path.write_text(
-            "# 收藏知识框架\n\n"
-            "## 最近入库\n\n",
-            encoding="utf-8",
-        )
-    with framework_path.open("a", encoding="utf-8") as f:
-        f.write(line)
-    update_platform_index(config, item, note_path)
-    update_tag_index(config, item, note_path)
 
 
 def enrich_capture(config: dict, item: dict, fetch_remote_metadata: bool = True) -> dict:
@@ -718,41 +690,15 @@ def fallback_markdown(item: dict) -> str:
     )
 
 
-def update_platform_index(config: dict, item: dict, note_path: Path) -> None:
-    platform = str(item.get("platform") or "unknown")
-    append_index_line(config, "90_Knowledge/平台索引.md", "平台索引", platform, item, note_path)
-
-
-def update_tag_index(config: dict, item: dict, note_path: Path) -> None:
-    for tag in item.get("tags") or ["未分类"]:
-        append_index_line(config, "90_Knowledge/标签索引.md", "标签索引", str(tag), item, note_path)
-
-
-def append_index_line(config: dict, relative_path: str, title: str, section: str, item: dict, note_path: Path) -> None:
-    root = notes_root(config)
-    path = root / relative_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    note_title = str(item.get("title") or note_path.stem)
-    rel = note_path.relative_to(root).as_posix()
-    heading = f"## {section}"
-    line = f"- {dt.date.today().isoformat()} [[{rel[:-3]}]] - {note_title}\n"
-    text = path.read_text(encoding="utf-8") if path.exists() else f"# {title}\n\n"
-    if line in text:
-        return
-    if heading not in text:
-        if not text.endswith("\n"):
-            text += "\n"
-        text += f"\n{heading}\n\n"
-    text += line
-    path.write_text(text, encoding="utf-8")
-
-
 def rebuild_knowledge_synthesis(config: dict) -> None:
     root = notes_root(config)
     notes = sorted((root / "10_Notes").glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
     limit = int(config.get("knowledge_recent_limit", 80))
     notes = notes[:limit]
     records = [note_record(root, path) for path in notes]
+    write_framework_index(config, root, records)
+    write_platform_index(root, records)
+    write_tag_index(root, records)
     write_ai_learning_context(root, records)
     write_topic_map(root, records)
     write_review_questions(root, records)
@@ -761,22 +707,111 @@ def rebuild_knowledge_synthesis(config: dict) -> None:
 
 def note_record(root: Path, note_path: Path) -> dict:
     text = note_path.read_text(encoding="utf-8", errors="replace")
+    sidecar = load_capture_sidecar(root, note_path)
     title = note_path.stem
     heading = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
     if heading:
         title = heading.group(1).strip()
-    tags = sorted(set(re.findall(r"#([\w\-\u4e00-\u9fff]+)", text)))
+
+    tags = set(str(tag).strip() for tag in sidecar.get("tags") or [] if str(tag).strip())
+    tags.update(re.findall(r"#([\w\-\u4e00-\u9fff]+)", text))
+    yaml_tags = re.search(r"^tags:\s*\[([^\]]*)\]\s*$", text, re.MULTILINE)
+    if yaml_tags:
+        tags.update(
+            value.strip().strip("\"'")
+            for value in yaml_tags.group(1).split(",")
+            if value.strip().strip("\"'")
+        )
+
+    platform = str(sidecar.get("platform") or "").strip()
     platform_match = re.search(r"^source:\s*\"?([^\"\n]+)\"?$", text, re.MULTILINE)
-    platform = platform_match.group(1).strip() if platform_match else "unknown"
+    if not platform and platform_match:
+        platform = platform_match.group(1).strip()
+    if not platform:
+        body_platform = re.search(r"^平台[:：]\s*([^\s]+)\s*$", text, re.MULTILINE)
+        platform = body_platform.group(1).strip() if body_platform else ""
+    if not platform:
+        url = str(sidecar.get("url") or "")
+        if not url:
+            url_match = re.search(r"https?://[^\s\])>\"']+", text)
+            url = url_match.group(0) if url_match else ""
+        platform = detect_platform(url)
+
     rel = note_path.relative_to(root).as_posix()
     summary = extract_section(text, "核心内容") or extract_section(text, "一句话") or extract_section(text, "为什么收藏")
-    return {"title": title, "tags": tags, "platform": platform, "rel": rel, "summary": first_sentence(summary or "")}
+    created = parse_date(sidecar.get("createdAt"))
+    date_text = (created or dt.datetime.fromtimestamp(note_path.stat().st_mtime)).date().isoformat()
+    return {
+        "title": title,
+        "tags": sorted(tags),
+        "platform": platform or "unknown",
+        "rel": rel,
+        "summary": first_sentence(summary or str(sidecar.get("summary") or "")),
+        "date": date_text,
+    }
+
+
+def load_capture_sidecar(root: Path, note_path: Path) -> dict:
+    sidecar_path = root / "00_Inbox" / f"{note_path.stem}.json"
+    if not sidecar_path.exists():
+        return {}
+    try:
+        value = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def extract_section(text: str, heading: str) -> str:
     pattern = rf"^##\s+{re.escape(heading)}\s*$([\s\S]*?)(?=^##\s+|\Z)"
     match = re.search(pattern, text, re.MULTILINE)
     return match.group(1).strip() if match else ""
+
+
+def write_framework_index(config: dict, root: Path, records: list[dict]) -> None:
+    relative_path = config.get("framework_file", "90_Knowledge/收藏知识框架.md")
+    path = root / relative_path
+    lines = [
+        "# 收藏知识框架",
+        "",
+        f"更新时间：{dt.datetime.now():%Y-%m-%d %H:%M}",
+        "",
+        "## 最近入库",
+        "",
+    ]
+    for record in records:
+        tags = " ".join(f"#{tag}" for tag in record["tags"])
+        lines.append(
+            f"- {record['date']} [[{record['rel'][:-3]}]] "
+            f"`{record['platform']}` {tags} - {record['title']}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def write_platform_index(root: Path, records: list[dict]) -> None:
+    grouped: dict[str, list[dict]] = {}
+    for record in records:
+        grouped.setdefault(record["platform"], []).append(record)
+    lines = ["# 平台索引", "", f"更新时间：{dt.datetime.now():%Y-%m-%d %H:%M}", ""]
+    for platform, items in sorted(grouped.items(), key=lambda pair: (-len(pair[1]), pair[0])):
+        lines.extend([f"## {platform}", ""])
+        lines.extend(f"- [[{item['rel'][:-3]}]] - {item['title']}" for item in items)
+        lines.append("")
+    write_knowledge_file(root, "平台索引.md", lines)
+
+
+def write_tag_index(root: Path, records: list[dict]) -> None:
+    grouped: dict[str, list[dict]] = {}
+    for record in records:
+        for tag in record["tags"] or ["未分类"]:
+            grouped.setdefault(tag, []).append(record)
+    lines = ["# 标签索引", "", f"更新时间：{dt.datetime.now():%Y-%m-%d %H:%M}", ""]
+    for tag, items in sorted(grouped.items(), key=lambda pair: (-len(pair[1]), pair[0])):
+        lines.extend([f"## {tag}", ""])
+        lines.extend(f"- [[{item['rel'][:-3]}]] - {item['title']}" for item in items)
+        lines.append("")
+    write_knowledge_file(root, "标签索引.md", lines)
 
 
 def write_ai_learning_context(root: Path, records: list[dict]) -> None:
