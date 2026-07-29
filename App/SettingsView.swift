@@ -55,6 +55,10 @@ struct SettingsView: View {
                     LabeledContent("待同步", value: "\(model.items.filter { $0.status != .synced }.count)")
                     if let health = model.lastHealth {
                         LabeledContent("桥接器", value: health.ok ? "在线" : "异常")
+                        if health.aiEnabled == true {
+                            let aiState = health.aiConfigured == true ? "已连接" : "缺少配置"
+                            LabeledContent("AI 草稿", value: aiState)
+                        }
                         if let notesRoot = health.notesRoot {
                             Text(notesRoot)
                                 .font(.footnote)

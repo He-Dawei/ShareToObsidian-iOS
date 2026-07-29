@@ -18,13 +18,14 @@ function Invoke-JsonRequest {
         [string]$Method,
         [string]$Uri,
         [object]$Body = $null,
-        [hashtable]$Headers = @{}
+        [hashtable]$Headers = @{},
+        [int]$TimeoutSec = 15
     )
 
     $params = @{
         Method = $Method
         Uri = $Uri
-        TimeoutSec = 15
+        TimeoutSec = $TimeoutSec
         Headers = $Headers
     }
     if ($null -ne $Body) {
@@ -162,6 +163,11 @@ $health = Invoke-JsonRequest -Method "GET" -Uri "$BaseUrl/health"
 if (-not $health.ok) {
     throw "Bridge health is not ok."
 }
+if ($config.ai.enabled) {
+    if (-not $health.aiEnabled -or -not $health.aiConfigured -or $health.aiProvider -ne $config.ai.provider) {
+        throw "Bridge AI health does not match the enabled local configuration."
+    }
+}
 if (-not $health.queueWritable) {
     throw "Bridge notes root is not writable."
 }
@@ -228,7 +234,7 @@ $payload = @{
     sourceApp = "windows-verifier"
 }
 
-$draft = Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/drafts" -Body $payload -Headers $headers
+$draft = Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/drafts" -Body $payload -Headers $headers -TimeoutSec 90
 if (-not $draft.summary -or -not $draft.markdown -or -not $draft.alternatives -or $draft.alternatives.Count -lt 3) {
     throw "Draft endpoint did not return summary + markdown + 3 alternatives."
 }

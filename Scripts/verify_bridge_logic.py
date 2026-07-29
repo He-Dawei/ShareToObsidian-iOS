@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -55,6 +57,118 @@ def main() -> int:
     assert bridge.detect_platform("https://b23.tv/abc") == "bilibili"
     assert bridge.detect_platform("https://xhslink.com/a") == "xiaohongshu"
     assert bridge.detect_platform("https://mp.weixin.qq.com/s/a") == "wechat"
+
+    ai_item = {
+        "url": "https://example.com/ai-draft",
+        "platform": "web",
+        "title": "AI 草稿验证",
+        "summary": "验证两种兼容协议。",
+        "tags": ["移动收藏"],
+    }
+    ai_draft = {
+        "summary": "AI 已生成摘要",
+        "markdown": (
+            "# AI 草稿\n\n"
+            "## 核心内容\n\n这是模型生成的正文。\n\n"
+            "## 视频介绍\n\n待补充。\n\n"
+            "## 后续行动\n\n- [ ] 验证结果。"
+        ),
+        "alternatives": ["# 行动清单", "# 知识卡片", "# 问题驱动"],
+        "tags": ["移动收藏", "AI"],
+    }
+    original_urlopen = bridge.urllib.request.urlopen
+    old_ai_key = os.environ.get("VERIFY_AI_KEY")
+    old_ai_base = os.environ.get("VERIFY_AI_BASE")
+    old_ai_model = os.environ.get("VERIFY_AI_MODEL")
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc_value, _traceback):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+    def fake_urlopen(request, timeout: int):
+        requests.append((request, timeout))
+        if request.full_url.endswith("/v1/messages"):
+            return FakeResponse(
+                {
+                    "content": [
+                        {"type": "thinking", "thinking": "ignored"},
+                        {"type": "text", "text": json.dumps(ai_draft, ensure_ascii=False)},
+                    ]
+                }
+            )
+        return FakeResponse(
+            {
+                "choices": [
+                    {"message": {"content": json.dumps(ai_draft, ensure_ascii=False)}}
+                ]
+            }
+        )
+
+    try:
+        os.environ["VERIFY_AI_KEY"] = "test-key"
+        os.environ["VERIFY_AI_BASE"] = "https://api.example.test/anthropic"
+        os.environ["VERIFY_AI_MODEL"] = "test-model"
+        bridge.urllib.request.urlopen = fake_urlopen
+
+        anthropic_config = {
+            "ai": {
+                "enabled": True,
+                "provider": "anthropic",
+                "base_url_env": "VERIFY_AI_BASE",
+                "model_env": "VERIFY_AI_MODEL",
+                "api_key_env": "VERIFY_AI_KEY",
+                "timeout_seconds": 12,
+            }
+        }
+        assert bridge.ai_is_configured(anthropic_config)
+        assert bridge.generate_markdown_draft(anthropic_config, ai_item) == ai_draft
+        anthropic_request, anthropic_timeout = requests[-1]
+        anthropic_headers = {key.lower(): value for key, value in anthropic_request.header_items()}
+        anthropic_body = json.loads(anthropic_request.data.decode("utf-8"))
+        assert anthropic_request.full_url == "https://api.example.test/anthropic/v1/messages"
+        assert anthropic_headers["x-api-key"] == "test-key"
+        assert anthropic_headers["anthropic-version"] == "2023-06-01"
+        assert anthropic_body["model"] == "test-model"
+        assert anthropic_body["max_tokens"] == 5000
+        assert anthropic_timeout == 12
+
+        openai_config = {
+            "ai": {
+                "enabled": True,
+                "provider": "openai",
+                "base_url": "https://api.example.test/v1",
+                "model": "test-openai-model",
+                "api_key_env": "VERIFY_AI_KEY",
+            }
+        }
+        assert bridge.generate_markdown_draft(openai_config, ai_item) == ai_draft
+        openai_request, _ = requests[-1]
+        openai_headers = {key.lower(): value for key, value in openai_request.header_items()}
+        openai_body = json.loads(openai_request.data.decode("utf-8"))
+        assert openai_request.full_url == "https://api.example.test/v1/chat/completions"
+        assert openai_headers["authorization"] == "Bearer test-key"
+        assert openai_body["model"] == "test-openai-model"
+    finally:
+        bridge.urllib.request.urlopen = original_urlopen
+        for name, value in (
+            ("VERIFY_AI_KEY", old_ai_key),
+            ("VERIFY_AI_BASE", old_ai_base),
+            ("VERIFY_AI_MODEL", old_ai_model),
+        ):
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "移动收藏"

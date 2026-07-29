@@ -8,7 +8,7 @@ struct SyncClient {
         static let fastPush: TimeInterval = 3
         static let normalPush: TimeInterval = 20
         static let health: TimeInterval = 5
-        static let draft: TimeInterval = 45
+        static let draft: TimeInterval = 90
         static let metadata: TimeInterval = 45
         static let delete: TimeInterval = 15
     }
@@ -111,6 +111,9 @@ struct BridgeHealth: Codable, Hashable {
     var ok: Bool
     var queueWritable: Bool?
     var notesRoot: String?
+    var aiEnabled: Bool?
+    var aiConfigured: Bool?
+    var aiProvider: String?
 }
 
 struct SyncPushResult: Codable, Hashable {

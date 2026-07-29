@@ -40,11 +40,15 @@ def handler_factory(config: dict):
             path = urlparse(self.path).path
             if path == "/health":
                 root = notes_root(config)
+                ai = config.get("ai") or {}
                 self.write_json(
                     {
                         "ok": True,
                         "queueWritable": root.exists() and root.is_dir(),
                         "notesRoot": str(root),
+                        "aiEnabled": bool(ai.get("enabled", False)),
+                        "aiConfigured": ai_is_configured(config),
+                        "aiProvider": str(ai.get("provider", "openai")).lower(),
                     }
                 )
                 return
@@ -459,32 +463,56 @@ def generate_ai_markdown_draft(config: dict, item: dict) -> dict | None:
     ai = config.get("ai") or {}
     if not ai.get("enabled", False):
         return None
-    api_key = os.environ.get(str(ai.get("api_key_env", "OPENAI_API_KEY")))
+
+    provider = str(ai.get("provider", "openai")).lower()
+    default_key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+    api_key = os.environ.get(str(ai.get("api_key_env", default_key_env)))
     if not api_key:
         return None
 
-    base_url = str(ai.get("base_url", "https://api.openai.com/v1")).rstrip("/")
-    model = str(ai.get("model", "gpt-4.1-mini"))
+    default_base_url = "https://api.anthropic.com" if provider == "anthropic" else "https://api.openai.com/v1"
+    default_model = "claude-3-5-haiku-latest" if provider == "anthropic" else "gpt-4.1-mini"
+    base_url = ai_value(ai, "base_url", default_base_url).rstrip("/")
+    model = ai_value(ai, "model", default_model)
     timeout = int(ai.get("timeout_seconds", 45))
     prompt = ai_prompt(item)
-    body = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": "你是帮助用户整理 Obsidian 收藏笔记的中文知识管理助手。只输出严格 JSON。",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.4,
-    }
-    request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={
+    system_prompt = "你是帮助用户整理 Obsidian 收藏笔记的中文知识管理助手。只输出严格 JSON。"
+
+    if provider == "anthropic":
+        endpoint = f"{base_url}/v1/messages"
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+        body = {
+            "model": model,
+            "max_tokens": 5000,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.4,
+        }
+    elif provider == "openai":
+        endpoint = f"{base_url}/chat/completions"
+        headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json; charset=utf-8",
-        },
+        }
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.4,
+        }
+    else:
+        return None
+
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
         method="POST",
     )
     try:
@@ -493,12 +521,43 @@ def generate_ai_markdown_draft(config: dict, item: dict) -> dict | None:
     except (OSError, urllib.error.URLError, json.JSONDecodeError):
         return None
 
-    content = (
-        payload.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-        .strip()
-    )
+    if provider == "anthropic":
+        content = "".join(
+            str(block.get("text", ""))
+            for block in payload.get("content", [])
+            if isinstance(block, dict) and block.get("type") == "text"
+        ).strip()
+    else:
+        content = (
+            payload.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+
+    return parse_ai_draft(content, item)
+
+
+def ai_value(ai: dict, key: str, default: str) -> str:
+    env_name = str(ai.get(f"{key}_env") or "").strip()
+    if env_name:
+        env_value = os.environ.get(env_name)
+        if env_value:
+            return env_value.strip()
+    return str(ai.get(key, default)).strip()
+
+
+def ai_is_configured(config: dict) -> bool:
+    ai = config.get("ai") or {}
+    if not ai.get("enabled", False):
+        return False
+    provider = str(ai.get("provider", "openai")).lower()
+    default_key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+    api_key = os.environ.get(str(ai.get("api_key_env", default_key_env)))
+    return bool(api_key and ai_value(ai, "base_url", "") and ai_value(ai, "model", ""))
+
+
+def parse_ai_draft(content: str, item: dict) -> dict | None:
     try:
         draft = json.loads(extract_json_object(content))
     except json.JSONDecodeError:
@@ -509,7 +568,12 @@ def generate_ai_markdown_draft(config: dict, item: dict) -> dict | None:
     required = {"summary", "markdown", "alternatives", "tags"}
     if not required.issubset(draft.keys()):
         return None
+    if not isinstance(draft.get("summary"), str) or not isinstance(draft.get("markdown"), str):
+        return None
     if not isinstance(draft.get("alternatives"), list) or len(draft["alternatives"]) < 3:
+        return None
+    required_sections = ["## 核心内容", "## 视频介绍", "## 后续行动"]
+    if any(section not in draft["markdown"] for section in required_sections):
         return None
     draft["alternatives"] = [str(value) for value in draft["alternatives"][:3]]
     draft["tags"] = [str(value) for value in draft.get("tags") or item.get("tags") or []]
@@ -523,6 +587,7 @@ def ai_prompt(item: dict) -> str:
         "请根据下面的分享内容，生成 Obsidian Markdown 草稿。\n"
         "要求：中文、结构化、适合后续 Codex/Claude 继续学习；不要编造具体视频事实；没有信息就写待补充。\n"
         "输出严格 JSON，字段为 summary, markdown, alternatives, tags。\n"
+        "markdown 主稿必须包含“## 核心内容”“## 视频介绍”“## 后续行动”三个二级标题。\n"
         "alternatives 必须正好 3 个 Markdown 字符串，分别偏行动清单、知识卡片、问题驱动。\n\n"
         f"标题：{item.get('title') or ''}\n"
         f"平台：{item.get('platform') or ''}\n"

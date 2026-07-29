@@ -29,7 +29,7 @@
 - App 可调用桥接器 `/drafts` 重新生成 3 种 Obsidian 文案版本
 - Share Extension 保存分享后会用 fast 模式立即尝试同步最多 3 条待处理队列；fast 模式跳过耗时元数据提取，电脑不在线时保留队列，之后由 App 补同步
 - App 删除已同步内容时会调用 Bridge 把 Obsidian 笔记和原始 JSON 移入 `80_Trash`
-- 桥接器支持可选 AI 文案生成：配置 `OPENAI_API_KEY` 并开启 `ai.enabled` 后使用 AI；未配置时自动回退本地模板
+- 桥接器支持 OpenAI/Anthropic 兼容的 AI 文案生成；DeepSeek 可直接读取 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`ANTHROPIC_AUTH_TOKEN`，失败时自动回退本地模板
 - Obsidian 自动维护 `收藏知识框架.md`、`平台索引.md`、`标签索引.md`
 - Obsidian 自动生成 `收藏主题地图.md`、`收藏复习问题.md`、`收藏行动池.md`
 - XcodeGen `project.yml`
