@@ -811,6 +811,7 @@ foreach ($needle in @(
     "enrich_capture_in_background",
     "process_cloud_relay_file",
     "start_cloud_relay_worker",
+    "ensure_claude_rules",
     "should_replace_summary",
     "ensure_agents_rules",
     "write_ai_learning_context",

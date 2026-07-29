@@ -261,6 +261,7 @@ def ensure_vault_layout(config: dict) -> None:
     (root / "90_Knowledge").mkdir(parents=True, exist_ok=True)
 
     ensure_agents_rules(root)
+    ensure_claude_rules(root)
 
 
 def ensure_agents_rules(root: Path) -> None:
@@ -281,6 +282,28 @@ def ensure_agents_rules(root: Path) -> None:
     ai_context_line = "- 优先读取 `90_Knowledge/AI学习上下文.md`，它是 Codex/Claude 的入口摘要。"
     if ai_context_line not in text:
         agents.write_text(text.rstrip() + "\n" + ai_context_line + "\n", encoding="utf-8")
+
+
+def ensure_claude_rules(root: Path) -> None:
+    claude = root / "CLAUDE.md"
+    default_text = (
+        "# 移动收藏学习入口\n\n"
+        "在此目录工作时，按以下顺序读取和整理：\n\n"
+        "1. `90_Knowledge/AI学习上下文.md`：最近收藏、主题信号和学习入口。\n"
+        "2. `90_Knowledge/收藏知识框架.md`：长期知识框架。\n"
+        "3. `10_Notes/`：结构化收藏正文。\n"
+        "4. `00_Inbox/`：仅在需要核对原始字段时读取。\n\n"
+        "基于收藏继续提炼核心观点、可验证事实、个人判断、行动项和复习问题。"
+        "不要编造原视频内容；信息不足时标记待验证。\n"
+    )
+    if not claude.exists():
+        claude.write_text(default_text, encoding="utf-8")
+        return
+
+    text = claude.read_text(encoding="utf-8", errors="replace")
+    ai_context_line = "1. `90_Knowledge/AI学习上下文.md`：最近收藏、主题信号和学习入口。"
+    if ai_context_line not in text:
+        claude.write_text(text.rstrip() + "\n\n" + ai_context_line + "\n", encoding="utf-8")
 
 
 def write_capture_note(config: dict, item: dict) -> Path:

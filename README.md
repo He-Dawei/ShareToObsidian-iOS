@@ -37,6 +37,7 @@
 - AI 生成标签时优先复用 Vault 已有标签，减少知识分类不断分叉
 - Obsidian 自动维护 `收藏知识框架.md`、`平台索引.md`、`标签索引.md`
 - Obsidian 自动生成 `收藏主题地图.md`、`收藏复习问题.md`、`收藏行动池.md`
+- 收藏目录自动维护 `AGENTS.md` 与 `CLAUDE.md`，让 Codex/Claude 使用同一个 `AI学习上下文.md` 入口
 - XcodeGen `project.yml`
 
 当前没有保留旧凌晨任务；旧任务 `DouyinFavoritesToObsidian` 已注销。

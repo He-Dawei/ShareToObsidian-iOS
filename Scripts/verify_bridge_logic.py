@@ -463,6 +463,9 @@ def main() -> int:
         assert "[[10_Notes/sample]]" in tag_text
         agents_text = (root / "AGENTS.md").read_text(encoding="utf-8")
         assert "AI学习上下文.md" in agents_text
+        claude_text = (root / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "AI学习上下文.md" in claude_text
+        assert "收藏知识框架.md" in claude_text
         config = {"obsidian_vault": tmp, "notes_subdir": "移动收藏"}
         assert bridge.existing_vault_tags(config)[:3] == ["移动收藏", "douyin", "视频"]
         prompt = bridge.ai_prompt(config, ai_item)
