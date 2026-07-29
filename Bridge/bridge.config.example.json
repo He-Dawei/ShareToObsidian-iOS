@@ -14,6 +14,7 @@
   "subtitle_timeout_seconds": 15,
   "content_timeout_seconds": 30,
   "content_max_chars": 12000,
+  "direct_network_platforms": ["bilibili"],
   "background_enrichment_enabled": true,
   "background_enrichment_workers": 1,
   "transcription": {

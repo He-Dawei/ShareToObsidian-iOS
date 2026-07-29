@@ -709,6 +709,7 @@ def fetch_ytdlp_metadata(config: dict, url: str) -> tuple[dict, str]:
             errors="replace",
             capture_output=True,
             timeout=int(config.get("metadata_timeout_seconds", 25)),
+            env=network_environment(config, url),
         )
     except Exception as exc:
         return {}, str(exc)
@@ -774,6 +775,7 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
                 errors="replace",
                 capture_output=True,
                 timeout=int(transcription.get("download_timeout_seconds", 180)),
+                env=network_environment(config, url),
             )
         except Exception as exc:
             return "", str(exc)
@@ -840,6 +842,7 @@ def fetch_web_content(config: dict, url: str) -> tuple[dict, str]:
             errors="replace",
             capture_output=True,
             timeout=int(config.get("content_timeout_seconds", 30)),
+            env=network_environment(config, url),
         )
     except Exception as exc:
         return {}, str(exc)
@@ -897,6 +900,26 @@ def find_cookies_file(config: dict) -> str:
     if configured and Path(configured).exists():
         return str(Path(configured))
     return ""
+
+
+def network_environment(config: dict, url: str) -> dict[str, str]:
+    environment = os.environ.copy()
+    direct_platforms = {
+        str(value).lower()
+        for value in config.get("direct_network_platforms") or ["bilibili"]
+    }
+    if detect_platform(url) not in direct_platforms:
+        return environment
+    for name in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ):
+        environment.pop(name, None)
+    return environment
 
 
 def compact_metadata(raw: dict, config: dict | None = None) -> dict:

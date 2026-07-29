@@ -59,6 +59,33 @@ def main() -> int:
     assert bridge.detect_platform("https://xhslink.com/a") == "xiaohongshu"
     assert bridge.detect_platform("https://mp.weixin.qq.com/s/a") == "wechat"
 
+    old_proxy_values = {
+        name: os.environ.get(name)
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy")
+    }
+    try:
+        os.environ["HTTP_PROXY"] = "http://127.0.0.1:7892"
+        os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7892"
+        os.environ["ALL_PROXY"] = "http://127.0.0.1:7892"
+        direct_environment = bridge.network_environment(
+            {"direct_network_platforms": ["bilibili"]},
+            "https://www.bilibili.com/video/BV1test",
+        )
+        proxied_environment = bridge.network_environment(
+            {"direct_network_platforms": ["bilibili"]},
+            "https://v.douyin.com/test",
+        )
+        assert "HTTP_PROXY" not in direct_environment
+        assert "HTTPS_PROXY" not in direct_environment
+        assert "ALL_PROXY" not in direct_environment
+        assert proxied_environment["HTTP_PROXY"] == "http://127.0.0.1:7892"
+    finally:
+        for name, value in old_proxy_values.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
     with tempfile.TemporaryDirectory() as tmp:
         defuddle = Path(tmp) / "defuddle.cmd"
         defuddle.write_text("@echo off\n", encoding="utf-8")
