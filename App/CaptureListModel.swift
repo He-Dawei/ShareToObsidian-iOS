@@ -432,8 +432,9 @@ final class CaptureListModel {
         if item.metadata == nil || item.backgroundEnrichedAt == nil {
             return true
         }
+        let transcriptText = item.metadata?.transcriptText ?? ""
         return [.douyin, .bilibili].contains(item.platform)
-            && item.metadata?.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            && transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && item.backgroundTranscribedAt == nil
             && item.backgroundTranscriptionFailedAt == nil
     }

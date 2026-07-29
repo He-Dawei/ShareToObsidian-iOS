@@ -152,8 +152,9 @@ enum CaptureSyncRunner {
             return false
         }
         let needsInitialEnrichment = item.metadata == nil || item.backgroundEnrichedAt == nil
+        let transcriptText = item.metadata?.transcriptText ?? ""
         let needsVideoTranscript = [.douyin, .bilibili].contains(item.platform)
-            && item.metadata?.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            && transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && item.backgroundTranscribedAt == nil
             && item.backgroundTranscriptionFailedAt == nil
         guard needsInitialEnrichment || needsVideoTranscript else {
