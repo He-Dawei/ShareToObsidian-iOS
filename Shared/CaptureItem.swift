@@ -57,6 +57,9 @@ struct CaptureItem: Identifiable, Codable, Hashable {
     var lastSyncAttemptAt: Date?
     var lastSyncedAt: Date?
     var lastMetadataRefreshAttemptAt: Date?
+    var backgroundEnrichedAt: Date?
+    var backgroundTranscribedAt: Date?
+    var backgroundTranscriptionFailedAt: Date?
     var createdAt: Date
     var updatedAt: Date
     var sourceApp: String?
@@ -82,6 +85,9 @@ struct CaptureItem: Identifiable, Codable, Hashable {
         self.lastSyncAttemptAt = nil
         self.lastSyncedAt = nil
         self.lastMetadataRefreshAttemptAt = nil
+        self.backgroundEnrichedAt = nil
+        self.backgroundTranscribedAt = nil
+        self.backgroundTranscriptionFailedAt = nil
         self.createdAt = Date()
         self.updatedAt = Date()
         self.sourceApp = sourceApp

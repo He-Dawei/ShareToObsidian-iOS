@@ -109,7 +109,7 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
                 if path == "/drafts":
                     self.write_json(generate_markdown_draft(config, item))
                     return
-                synced_at = dt.datetime.now(dt.timezone.utc).isoformat()
+                synced_at = utc_timestamp()
                 item["status"] = "synced"
                 item["syncError"] = None
                 item["lastSyncedAt"] = synced_at
@@ -202,7 +202,7 @@ def pairing_payload(config: dict) -> dict:
         "bridgeURL": f"http://{host}:{port}",
         "token": config.get("token", ""),
         "notesRoot": str(notes_root(config)),
-        "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "createdAt": utc_timestamp(),
     }
 
 
@@ -412,6 +412,16 @@ def enrich_capture_in_background(config: dict, item: dict, write_lock: threading
         if not transcript:
             if transcription_error:
                 print(f"Background transcription failed for {item.get('url')}: {transcription_error}")
+                failed_metadata = dict(metadata)
+                failed_metadata["transcription_error"] = transcription_error
+                persist_background_enrichment(
+                    config,
+                    persisted,
+                    failed_metadata,
+                    generated,
+                    write_lock,
+                    completion_field="backgroundTranscriptionFailedAt",
+                )
             return
 
         transcript_metadata = dict(metadata)
@@ -462,7 +472,7 @@ def persist_background_enrichment(
         if merged.get("isUserEdited") is not True:
             merged["summary"] = generated.get("summary") or merged.get("summary")
             merged["draftMarkdown"] = generated.get("markdown") or merged.get("draftMarkdown")
-        completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        completed_at = utc_timestamp()
         merged["status"] = "synced"
         merged["syncError"] = None
         merged["lastSyncedAt"] = merged.get("lastSyncedAt") or completed_at
@@ -525,7 +535,7 @@ def process_cloud_relay_file(config: dict, queue_path: Path, write_lock: threadi
     item_id = str(item.get("id") or "").strip()
     if not item_id:
         raise ValueError(f"Relay item has no id: {queue_path.name}")
-    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    now = utc_timestamp()
 
     if str(item.get("status") or "") == "deleted":
         with write_lock:
@@ -1734,6 +1744,10 @@ def first_sentence(value: str) -> str:
     if len(value) <= 180:
         return value
     return value[:180].rstrip() + "..."
+
+
+def utc_timestamp() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def parse_date(value: str | None) -> dt.datetime | None:

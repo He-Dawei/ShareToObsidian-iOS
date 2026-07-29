@@ -23,6 +23,8 @@ def load_bridge_module():
 
 def main() -> int:
     bridge = load_bridge_module()
+    assert bridge.utc_timestamp().endswith("Z")
+    assert "." not in bridge.utc_timestamp()
 
     def fake_fetch_metadata(_config: dict, _url: str) -> dict:
         return {

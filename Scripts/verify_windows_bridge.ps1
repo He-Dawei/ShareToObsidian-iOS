@@ -757,7 +757,14 @@ if (-not [regex]::IsMatch($captureFileStoreText, $duplicateQueuedPattern)) {
 }
 
 $captureItemText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\CaptureItem.swift") -Raw -Encoding UTF8
-foreach ($needle in @("case deleted", '"' + $pendingDeleteLabel + '"', "lastMetadataRefreshAttemptAt")) {
+foreach ($needle in @(
+    "case deleted",
+    '"' + $pendingDeleteLabel + '"',
+    "lastMetadataRefreshAttemptAt",
+    "backgroundEnrichedAt",
+    "backgroundTranscribedAt",
+    "backgroundTranscriptionFailedAt"
+)) {
     if (-not $captureItemText.Contains($needle)) {
         throw "CaptureItem missing pending-delete status support: $needle"
     }
@@ -767,6 +774,9 @@ $captureSyncRunnerText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\C
 foreach ($needle in @(
     "enrichSyncedMissingMetadata",
     "shouldEnrichSyncedItem",
+    "needsVideoTranscript",
+    "backgroundTranscribedAt",
+    "backgroundTranscriptionFailedAt",
     "client.fetchRemoteCapture",
     "lastMetadataRefreshAttemptAt",
     "status == .deleted",
@@ -801,6 +811,9 @@ foreach ($needle in @(
     if (-not $captureSyncRunnerText.Contains($needle)) {
         throw "CaptureSyncRunner missing pending-delete sync support: $needle"
     }
+}
+if (-not $captureFileStoreText.Contains(".withFractionalSeconds")) {
+    throw "CaptureFileStore must decode ISO 8601 dates with fractional seconds."
 }
 $finalQueueCountPattern = [regex]::Escape("var finalItems = items") + "[\s\S]*?" + [regex]::Escape("let merged = reconcileWithLatestStore") + "[\s\S]*?" + [regex]::Escape("finalItems = merged") + "[\s\S]*?" + [regex]::Escape("let queuedCount = finalItems.filter")
 if (-not [regex]::IsMatch($captureSyncRunnerText, $finalQueueCountPattern)) {

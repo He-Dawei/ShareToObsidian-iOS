@@ -147,13 +147,20 @@ enum CaptureSyncRunner {
     private static func shouldEnrichSyncedItem(_ item: CaptureItem, enabled: Bool) -> Bool {
         guard enabled,
               item.status == .synced,
-              item.metadata == nil,
               let remoteNotePath = item.remoteNotePath,
               !remoteNotePath.isEmpty else {
             return false
         }
+        let needsInitialEnrichment = item.metadata == nil || item.backgroundEnrichedAt == nil
+        let needsVideoTranscript = [.douyin, .bilibili].contains(item.platform)
+            && item.metadata?.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            && item.backgroundTranscribedAt == nil
+            && item.backgroundTranscriptionFailedAt == nil
+        guard needsInitialEnrichment || needsVideoTranscript else {
+            return false
+        }
         if let lastAttempt = item.lastMetadataRefreshAttemptAt {
-            return Date().timeIntervalSince(lastAttempt) > 24 * 60 * 60
+            return Date().timeIntervalSince(lastAttempt) > 30
         }
         return true
     }

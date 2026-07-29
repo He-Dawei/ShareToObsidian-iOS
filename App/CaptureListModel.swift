@@ -425,12 +425,17 @@ final class CaptureListModel {
 
     private func shouldEnrichSyncedItem(_ item: CaptureItem) -> Bool {
         guard item.status == .synced,
-              item.metadata == nil,
               let remoteNotePath = item.remoteNotePath,
               !remoteNotePath.isEmpty else {
             return false
         }
-        return true
+        if item.metadata == nil || item.backgroundEnrichedAt == nil {
+            return true
+        }
+        return [.douyin, .bilibili].contains(item.platform)
+            && item.metadata?.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            && item.backgroundTranscribedAt == nil
+            && item.backgroundTranscriptionFailedAt == nil
     }
 
     private func syncStatusMessage(for summary: CaptureSyncSummary) -> String? {
