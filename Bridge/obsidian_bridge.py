@@ -103,6 +103,18 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
                     self.write_json({"ok": True, "item": read_capture_item(config, item)})
                     return
                 if path == "/captures":
+                    tombstone = capture_tombstone(config, item)
+                    if tombstone is not None:
+                        relative_path = str(tombstone.get("remoteNotePath") or "")
+                        self.write_json(
+                            {
+                                "ok": True,
+                                "path": relative_path,
+                                "relativePath": relative_path,
+                                "item": tombstone,
+                            }
+                        )
+                        return
                     item = merge_incoming_capture(config, item)
                 item = enrich_capture(config, item, fetch_remote_metadata=not fast)
                 if path == "/metadata":
@@ -377,10 +389,78 @@ def read_capture_item(config: dict, payload: dict) -> dict:
     note_path = resolve_note_path(root, requested)
     raw_path = root / config.get("inbox_subdir", "00_Inbox") / f"{note_path.stem}.json"
     if not note_path.exists() or not raw_path.exists():
+        tombstone = capture_tombstone(config, {"remoteNotePath": requested})
+        if tombstone is not None:
+            return tombstone
         raise FileNotFoundError(f"Capture not found: {requested}")
     item = json.loads(raw_path.read_text(encoding="utf-8"))
     item["remoteNotePath"] = note_path.relative_to(root).as_posix()
     return item
+
+
+def tombstone_store_path(config: dict) -> Path:
+    return notes_root(config) / "80_Trash" / "deleted-captures.json"
+
+
+def load_capture_tombstones(config: dict) -> list[dict]:
+    path = tombstone_store_path(config)
+    if not path.exists():
+        return []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def capture_tombstone(config: dict, item: dict) -> dict | None:
+    capture_id = str(item.get("id") or "").strip().lower()
+    remote_path = str(item.get("remoteNotePath") or item.get("path") or "").replace("\\", "/")
+    remote_path = remote_path.lstrip("/")
+    for tombstone in load_capture_tombstones(config):
+        tombstone_id = str(tombstone.get("id") or "").strip().lower()
+        tombstone_path = str(tombstone.get("remoteNotePath") or "").replace("\\", "/").lstrip("/")
+        if capture_id and tombstone_id == capture_id:
+            return dict(tombstone)
+        if remote_path and tombstone_path == remote_path:
+            return dict(tombstone)
+    return None
+
+
+def record_capture_tombstone(config: dict, item: dict, remote_note_path: str) -> None:
+    if str(item.get("sourceApp") or "") == "windows-verifier":
+        return
+    capture_id = str(item.get("id") or "").strip()
+    if not capture_id:
+        return
+    now = utc_timestamp()
+    tombstone = {
+        "id": capture_id,
+        "url": str(item.get("url") or "https://example.invalid/deleted"),
+        "platform": str(item.get("platform") or "unknown"),
+        "title": str(item.get("title") or "已删除收藏"),
+        "summary": "",
+        "draftMarkdown": "",
+        "alternativeDrafts": [],
+        "tags": [],
+        "status": "deleted",
+        "isUserEdited": False,
+        "remoteNotePath": remote_note_path,
+        "createdAt": item.get("createdAt") or now,
+        "updatedAt": now,
+        "lastSyncedAt": now,
+    }
+    tombstones = [
+        value
+        for value in load_capture_tombstones(config)
+        if str(value.get("id") or "").strip().lower() != capture_id.lower()
+    ]
+    tombstones.append(tombstone)
+    path = tombstone_store_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(tombstones, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 def merge_incoming_capture(config: dict, incoming: dict) -> dict:
@@ -470,6 +550,11 @@ def enrich_capture_in_background(config: dict, item: dict, write_lock: threading
             metadata = fetch_metadata(config, str(item.get("url") or ""))
         elif should_retry_video_metadata(metadata, platform):
             video_metadata, _ = fetch_ytdlp_metadata(config, str(item.get("url") or ""))
+            if not video_metadata and platform == "bilibili":
+                video_metadata, _ = fetch_bilibili_api_metadata(
+                    config,
+                    str(item.get("url") or ""),
+                )
             if video_metadata:
                 metadata = {**metadata, **video_metadata}
         candidate = enrich_capture(
@@ -543,6 +628,8 @@ def persist_background_enrichment(
         try:
             latest = read_capture_item(config, item)
         except FileNotFoundError:
+            return None
+        if str(latest.get("status") or "") == "deleted":
             return None
 
         merged = enrich_capture(
@@ -621,8 +708,13 @@ def process_cloud_relay_file(config: dict, queue_path: Path, write_lock: threadi
     if not item_id:
         raise ValueError(f"Relay item has no id: {queue_path.name}")
     now = utc_timestamp()
+    tombstone = capture_tombstone(config, item)
 
-    if str(item.get("status") or "") == "deleted":
+    if tombstone is not None and str(item.get("status") or "") != "deleted":
+        item = tombstone
+        item["updatedAt"] = now
+        item["lastSyncedAt"] = now
+    elif str(item.get("status") or "") == "deleted":
         with write_lock:
             remote_path = str(item.get("remoteNotePath") or "")
             if remote_path:
@@ -679,6 +771,16 @@ def delete_capture_note(config: dict, payload: dict) -> dict:
     note_path = resolve_note_path(root, requested)
     trash = root / "80_Trash"
     trash.mkdir(parents=True, exist_ok=True)
+    raw_path = root / config.get("inbox_subdir", "00_Inbox") / f"{note_path.stem}.json"
+    stored_item = None
+    if raw_path.exists():
+        try:
+            stored_item = json.loads(raw_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            stored_item = None
+    remote_note_path = note_path.relative_to(root).as_posix()
+    if isinstance(stored_item, dict):
+        record_capture_tombstone(config, stored_item, remote_note_path)
 
     moved: list[str] = []
     if note_path.exists():
@@ -686,7 +788,6 @@ def delete_capture_note(config: dict, payload: dict) -> dict:
         note_path.replace(trashed_note)
         moved.append(str(trashed_note))
 
-    raw_path = root / "00_Inbox" / f"{note_path.stem}.json"
     if raw_path.exists():
         trashed_raw = unique_path(trash / raw_path.name)
         raw_path.replace(trashed_raw)
@@ -694,7 +795,8 @@ def delete_capture_note(config: dict, payload: dict) -> dict:
 
     remove_note_from_indexes(root, note_path)
     rebuild_knowledge_synthesis(config)
-    return {"ok": True, "deleted": bool(moved), "moved": moved}
+    deleted = bool(moved) or capture_tombstone(config, {"remoteNotePath": remote_note_path}) is not None
+    return {"ok": True, "deleted": deleted, "moved": moved}
 
 
 def resolve_note_path(root: Path, requested: str) -> Path:
@@ -769,6 +871,11 @@ def fetch_metadata(config: dict, url: str) -> dict:
     video_metadata, video_error = fetch_ytdlp_metadata(config, url)
     if video_metadata:
         return video_metadata
+    if platform == "bilibili":
+        video_metadata, bilibili_error = fetch_bilibili_api_metadata(config, url)
+        if video_metadata:
+            return video_metadata
+        video_error = bilibili_error or video_error
 
     if platform not in {"web", "wechat"}:
         web_metadata, web_error = fetch_web_content(config, url)
@@ -817,6 +924,70 @@ def fetch_ytdlp_metadata(config: dict, url: str) -> tuple[dict, str]:
     return compact_metadata(raw, config), ""
 
 
+def fetch_bilibili_api_metadata(config: dict, url: str) -> tuple[dict, str]:
+    bvid = bilibili_bvid(url)
+    if not bvid:
+        return {}, "Bilibili URL 中没有可识别的 BV 号"
+    payload, error = fetch_bilibili_api_json(
+        config,
+        f"https://api.bilibili.com/x/web-interface/view?bvid={quote(bvid)}",
+    )
+    if error:
+        return {}, error
+    data = payload.get("data") or {}
+    if payload.get("code") != 0 or not isinstance(data, dict):
+        return {}, str(payload.get("message") or "Bilibili 元数据接口返回异常")
+    owner = data.get("owner") or {}
+    stats = data.get("stat") or {}
+    metadata = {
+        "title": data.get("title"),
+        "description": data.get("desc"),
+        "uploader": owner.get("name"),
+        "channel": owner.get("name"),
+        "duration": data.get("duration"),
+        "view_count": stats.get("view"),
+        "like_count": stats.get("like"),
+        "thumbnail": data.get("pic"),
+        "webpage_url": url,
+        "extractor": "Bilibili API",
+        "bilibili_cid": data.get("cid"),
+        "bilibili_bvid": bvid,
+    }
+    return {key: value for key, value in metadata.items() if value not in (None, "")}, ""
+
+
+def fetch_bilibili_api_json(config: dict, url: str) -> tuple[dict, str]:
+    user_agent = str(
+        config.get(
+            "web_user_agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+        )
+    )
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": user_agent,
+            "Referer": "https://www.bilibili.com/",
+        },
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(
+            request,
+            timeout=int(config.get("metadata_timeout_seconds", 25)),
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return {}, str(exc)
+    return payload if isinstance(payload, dict) else {}, ""
+
+
+def bilibili_bvid(url: str) -> str:
+    match = re.search(r"/video/(BV[0-9A-Za-z]+)", url, flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
 def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str, str]:
     transcription = config.get("transcription") or {}
     if not transcription.get("enabled", False):
@@ -828,63 +999,23 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
     if platform.lower() not in enabled_platforms:
         return "", ""
 
-    ytdlp = find_ytdlp(config)
     command_template = transcription.get("command") or []
-    if not ytdlp:
-        return "", "yt-dlp 未安装或路径无效"
     if not command_template:
         return "", "transcription.command 未配置"
 
     with tempfile.TemporaryDirectory(prefix="sharetoobsidian-asr-") as tmp:
         work_dir = Path(tmp)
-        audio_template = work_dir / "audio.%(ext)s"
-        download_command = [
-            ytdlp,
-            "--no-playlist",
-            "--no-warnings",
-            "--socket-timeout",
-            str(config.get("metadata_socket_timeout", 12)),
-        ]
-        cookies_file = find_cookies_file(config)
-        if cookies_file:
-            download_command.extend(["--cookies", cookies_file])
-        ffmpeg_path = str(transcription.get("ffmpeg_path") or "").strip()
-        if ffmpeg_path:
-            download_command.extend(["--ffmpeg-location", ffmpeg_path])
-        download_command.extend(
-            [
-                "--postprocessor-args",
-                "ffmpeg:-ar 24000 -ac 1",
-                "-x",
-                "--audio-format",
-                "wav",
-                "-o",
-                str(audio_template),
-                "--",
-                url,
-            ]
+        audio_file, download_error = download_capture_audio(
+            config,
+            url,
+            platform,
+            work_dir,
         )
-        try:
-            downloaded = subprocess.run(
-                download_command,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                timeout=int(transcription.get("download_timeout_seconds", 180)),
-                env=network_environment(config, url),
-            )
-        except Exception as exc:
-            return "", str(exc)
-        if downloaded.returncode != 0:
-            return "", downloaded.stderr.strip()[-500:]
-
-        audio_files = sorted(work_dir.glob("audio*.wav"))
-        if not audio_files:
-            return "", "yt-dlp 未生成 WAV 音频"
+        if audio_file is None:
+            return "", download_error
         output_path = work_dir / "transcript.txt"
         values = {
-            "audio": str(audio_files[0]),
+            "audio": str(audio_file),
             "output": str(output_path),
         }
         command = [
@@ -915,6 +1046,174 @@ def transcribe_capture_audio(config: dict, url: str, platform: str) -> tuple[str
 
         transcript = output_path.read_text(encoding="utf-8", errors="replace").strip()
         return transcript[:max_chars], ""
+
+
+def download_capture_audio(
+    config: dict,
+    url: str,
+    platform: str,
+    work_dir: Path,
+) -> tuple[Path | None, str]:
+    bilibili_error = ""
+    if platform.lower() == "bilibili":
+        audio_file, bilibili_error = download_bilibili_audio(config, url, work_dir)
+        if audio_file is not None:
+            return audio_file, ""
+    audio_file, ytdlp_error = download_ytdlp_audio(config, url, work_dir)
+    if audio_file is not None:
+        return audio_file, ""
+    errors = [value for value in (bilibili_error, ytdlp_error) if value]
+    return None, "；".join(errors) or "未能下载视频音频"
+
+
+def download_ytdlp_audio(
+    config: dict,
+    url: str,
+    work_dir: Path,
+) -> tuple[Path | None, str]:
+    transcription = config.get("transcription") or {}
+    ytdlp = find_ytdlp(config)
+    if not ytdlp:
+        return None, "yt-dlp 未安装或路径无效"
+    audio_template = work_dir / "audio.%(ext)s"
+    download_command = [
+        ytdlp,
+        "--no-playlist",
+        "--no-warnings",
+        "--socket-timeout",
+        str(config.get("metadata_socket_timeout", 12)),
+    ]
+    cookies_file = find_cookies_file(config)
+    if cookies_file:
+        download_command.extend(["--cookies", cookies_file])
+    ffmpeg_path = str(transcription.get("ffmpeg_path") or "").strip()
+    if ffmpeg_path:
+        download_command.extend(["--ffmpeg-location", ffmpeg_path])
+    download_command.extend(
+        [
+            "--postprocessor-args",
+            "ffmpeg:-ar 24000 -ac 1",
+            "-x",
+            "--audio-format",
+            "wav",
+            "-o",
+            str(audio_template),
+            "--",
+            url,
+        ]
+    )
+    try:
+        downloaded = subprocess.run(
+            download_command,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=int(transcription.get("download_timeout_seconds", 180)),
+            env=network_environment(config, url),
+        )
+    except Exception as exc:
+        return None, str(exc)
+    if downloaded.returncode != 0:
+        return None, downloaded.stderr.strip()[-500:]
+    audio_files = sorted(work_dir.glob("audio*.wav"))
+    if not audio_files:
+        return None, "yt-dlp 未生成 WAV 音频"
+    return audio_files[0], ""
+
+
+def download_bilibili_audio(
+    config: dict,
+    url: str,
+    work_dir: Path,
+) -> tuple[Path | None, str]:
+    metadata, error = fetch_bilibili_api_metadata(config, url)
+    if error:
+        return None, error
+    bvid = str(metadata.get("bilibili_bvid") or "")
+    cid = metadata.get("bilibili_cid")
+    if not bvid or not cid:
+        return None, "Bilibili 元数据缺少 bvid 或 cid"
+    payload, error = fetch_bilibili_api_json(
+        config,
+        "https://api.bilibili.com/x/player/playurl"
+        f"?bvid={quote(bvid)}&cid={quote(str(cid))}&fnval=16&qn=64&fourk=0",
+    )
+    if error:
+        return None, error
+    data = payload.get("data") or {}
+    dash = data.get("dash") or {}
+    candidates = [value for value in dash.get("audio") or [] if isinstance(value, dict)]
+    if not candidates:
+        candidates = [value for value in data.get("durl") or [] if isinstance(value, dict)]
+    if payload.get("code") != 0 or not candidates:
+        return None, str(payload.get("message") or "Bilibili 播放接口没有返回音频")
+    selected = max(candidates, key=lambda value: int(value.get("bandwidth") or 0))
+    media_url = str(
+        selected.get("baseUrl")
+        or selected.get("base_url")
+        or selected.get("url")
+        or ""
+    )
+    if not media_url:
+        return None, "Bilibili 播放接口没有可用音频地址"
+
+    user_agent = str(
+        config.get(
+            "web_user_agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+        )
+    )
+    media_request = urllib.request.Request(
+        media_url,
+        headers={
+            "User-Agent": user_agent,
+            "Referer": "https://www.bilibili.com/",
+        },
+    )
+    media_path = work_dir / "bilibili-audio.m4s"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(
+            media_request,
+            timeout=int((config.get("transcription") or {}).get("download_timeout_seconds", 180)),
+        ) as response, media_path.open("wb") as target:
+            shutil.copyfileobj(response, target)
+    except (OSError, urllib.error.URLError) as exc:
+        return None, str(exc)
+
+    transcription = config.get("transcription") or {}
+    ffmpeg = str(transcription.get("ffmpeg_path") or shutil.which("ffmpeg") or "").strip()
+    if not ffmpeg or not Path(ffmpeg).exists():
+        return None, "FFmpeg 未安装或路径无效"
+    output_path = work_dir / "audio.wav"
+    converted = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(media_path),
+            "-ar",
+            "24000",
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            str(output_path),
+        ],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=int(transcription.get("download_timeout_seconds", 180)),
+    )
+    if converted.returncode != 0 or not output_path.exists():
+        return None, converted.stderr.strip()[-500:] or "FFmpeg 未生成 WAV 音频"
+    return output_path, ""
 
 
 def read_partial_transcript(output_path: Path, max_chars: int) -> str:

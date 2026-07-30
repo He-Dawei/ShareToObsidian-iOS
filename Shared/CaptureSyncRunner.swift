@@ -80,6 +80,13 @@ enum CaptureSyncRunner {
                         throw URLError(.fileDoesNotExist)
                     }
                     let remote = try await client.fetchRemoteCapture(path: remoteNotePath)
+                    if remote.status == .deleted {
+                        let itemID = items[index].id
+                        items.remove(at: index)
+                        try? CloudRelayStore.removeQueuedItem(id: itemID)
+                        syncedCount += 1
+                        continue
+                    }
                     if remote.metadata != nil {
                         items[index] = remote
                         items[index].status = .synced
@@ -95,6 +102,13 @@ enum CaptureSyncRunner {
                     }
                 } else {
                     let result = try await client.push(items[index], fast: fast)
+                    if result.item?.status == .deleted {
+                        let itemID = items[index].id
+                        items.remove(at: index)
+                        try? CloudRelayStore.removeQueuedItem(id: itemID)
+                        syncedCount += 1
+                        continue
+                    }
                     items[index] = result.item ?? items[index]
                     items[index].status = .synced
                     items[index].remoteNotePath = result.relativePath ?? result.path

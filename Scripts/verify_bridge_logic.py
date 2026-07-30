@@ -287,6 +287,10 @@ def main() -> int:
             assert preserved["draftMarkdown"] == "# 用户最终稿"
 
             bridge.delete_capture_note(config, {"path": relative_path})
+            tombstone = bridge.capture_tombstone(config, completed)
+            assert tombstone is not None
+            assert tombstone["status"] == "deleted"
+            assert bridge.read_capture_item(config, {"path": relative_path})["status"] == "deleted"
             bridge.enrich_capture_in_background(config, completed, bridge.threading.Lock())
             assert not note_path.exists()
         finally:
@@ -384,6 +388,36 @@ def main() -> int:
         {"extractor": "Defuddle", "content_text": "网页正文。"},
         "web",
     )
+    assert bridge.bilibili_bvid("https://www.bilibili.com/video/BV15qQwB4EZ9/") == "BV15qQwB4EZ9"
+    original_bilibili_api = bridge.fetch_bilibili_api_json
+
+    def fake_bilibili_api(_config, _url):
+        return {
+            "code": 0,
+            "data": {
+                "title": "Bilibili API 标题",
+                "desc": "Bilibili API 简介",
+                "duration": 523,
+                "cid": 12345,
+                "owner": {"name": "视频作者"},
+                "stat": {"view": 100, "like": 20},
+                "pic": "https://example.com/cover.jpg",
+            },
+        }, ""
+
+    try:
+        bridge.fetch_bilibili_api_json = fake_bilibili_api
+        bilibili_metadata, bilibili_error = bridge.fetch_bilibili_api_metadata(
+            {},
+            "https://www.bilibili.com/video/BV15qQwB4EZ9/",
+        )
+    finally:
+        bridge.fetch_bilibili_api_json = original_bilibili_api
+    assert not bilibili_error
+    assert bilibili_metadata["title"] == "Bilibili API 标题"
+    assert bilibili_metadata["duration"] == 523
+    assert bilibili_metadata["bilibili_cid"] == 12345
+    assert bilibili_metadata["extractor"] == "Bilibili API"
 
     with tempfile.TemporaryDirectory() as tmp:
         relay_root = Path(tmp) / "iCloudRelay"
@@ -459,6 +493,15 @@ def main() -> int:
             assert not note_path.exists()
             deletion_ack = json.loads(processed_path.read_text(encoding="utf-8"))
             assert deletion_ack["status"] == "deleted"
+
+            stale_item = dict(repeated)
+            stale_item["status"] = "queued"
+            stale_item["updatedAt"] = "2026-07-29T09:30:00Z"
+            queue_path.write_text(json.dumps(stale_item, ensure_ascii=False), encoding="utf-8")
+            replayed = bridge.process_cloud_relay_file(config, queue_path, bridge.threading.Lock())
+            assert replayed["status"] == "deleted"
+            assert not note_path.exists()
+            assert len(list((bridge.notes_root(config) / "10_Notes").glob("*.md"))) == 0
         finally:
             bridge.fetch_metadata = original_fetch_metadata
             bridge.generate_markdown_draft = original_generate_draft

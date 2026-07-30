@@ -76,9 +76,13 @@ function Invoke-ErrorJsonRequest {
         if (-not $bodyText) {
             throw "Expected a JSON error body from $Uri"
         }
+        $contentType = [string]$_.Exception.Response.ContentType
+        if (-not $contentType -and $_.Exception.Response.Content) {
+            $contentType = [string]$_.Exception.Response.Content.Headers.ContentType
+        }
         return [pscustomobject]@{
             StatusCode = [int]$_.Exception.Response.StatusCode
-            ContentType = [string]$_.Exception.Response.ContentType
+            ContentType = $contentType
             Body = $bodyText
             Json = $bodyText | ConvertFrom-Json
         }
@@ -856,6 +860,12 @@ foreach ($needle in @(
     "transcript_text",
     "read_partial_transcript",
     "ffmpeg:-ar 24000 -ac 1",
+    "fetch_bilibili_api_metadata",
+    "download_bilibili_audio",
+    "api.bilibili.com/x/player/playurl",
+    "capture_tombstone",
+    "record_capture_tombstone",
+    "deleted-captures.json",
     "metadata.get('transcript')",
     "fetch_web_content",
     "Defuddle",
@@ -883,6 +893,17 @@ foreach ($needle in @(
 )) {
     if (-not $captureFileStoreText.Contains($needle)) {
         throw "CaptureFileStore missing tracking-aware URL deduplication: $needle"
+    }
+}
+
+$captureSyncRunnerText = Get-Content -LiteralPath (Join-Path $repoRoot "Shared\CaptureSyncRunner.swift") -Raw -Encoding UTF8
+foreach ($needle in @(
+    "remote.status == .deleted",
+    "result.item?.status == .deleted",
+    "CloudRelayStore.removeQueuedItem"
+)) {
+    if (-not $captureSyncRunnerText.Contains($needle)) {
+        throw "CaptureSyncRunner missing deleted capture acknowledgement support: $needle"
     }
 }
 
