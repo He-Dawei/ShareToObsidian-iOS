@@ -76,7 +76,13 @@ struct ContentView: View {
                 }
                 .toolbar {
                     Button {
-                        Task { await model.syncQueued() }
+                        Task {
+                            await model.refreshHealth()
+                            if model.lastHealth?.ok == true {
+                                await model.refreshRemoteLibrary()
+                            }
+                            await model.syncQueued()
+                        }
                     } label: {
                         Image(systemName: model.isSyncing ? "arrow.triangle.2.circlepath" : "icloud.and.arrow.up")
                     }
@@ -106,6 +112,9 @@ struct ContentView: View {
                 Task {
                     model.reload()
                     await model.refreshHealth()
+                    if model.lastHealth?.ok == true {
+                        await model.refreshRemoteLibrary()
+                    }
                     await model.syncIfPossible()
                 }
             case .background:

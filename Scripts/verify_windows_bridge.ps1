@@ -282,6 +282,13 @@ if ($readBack.item.remoteNotePath -ne $push.relativePath) {
 }
 Write-Host "Capture read-back check passed."
 
+$remoteLibrary = Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/captures/list" -Body @{} -Headers $headers
+$listedCapture = @($remoteLibrary.items | Where-Object { $_.id -eq $payload.id })
+if (-not $remoteLibrary.ok -or $listedCapture.Count -ne 1 -or $listedCapture[0].remoteNotePath -ne $push.relativePath) {
+    throw "Capture list endpoint did not return the stored item."
+}
+Write-Host "Capture list check passed."
+
 $payload["remoteNotePath"] = $push.relativePath
 $payload["draftMarkdown"] = "# $title`n`n## $coreContent`n`nVerification overwrite update.`n"
 $payload["updatedAt"] = (Get-Date).ToUniversalTime().AddSeconds(2).ToString("o")
@@ -318,6 +325,10 @@ if (-not $deleteResult.ok) {
 }
 if (Test-Path -LiteralPath $notePath) {
     throw "Note still exists after delete: $notePath"
+}
+$libraryAfterDelete = Invoke-JsonRequest -Method "POST" -Uri "$BaseUrl/captures/list" -Body @{} -Headers $headers
+if (@($libraryAfterDelete.items | Where-Object { $_.id -eq $payload.id }).Count -ne 0) {
+    throw "Deleted verifier item still appears in the remote capture list."
 }
 Write-Host "Delete check passed."
 
@@ -590,7 +601,10 @@ foreach ($needle in @(
     "statusMessage",
     "allowedContentTypes: [.folder]",
     "model.configureCloudRelay(folderURL: folderURL)",
-    "model.createCloudRelayVerificationCapture()"
+    "model.createCloudRelayVerificationCapture()",
+    "CaptureSettingsStore.pairingText",
+    "复制扩展配对配置",
+    "回读电脑收藏"
 )) {
     if (-not $settingsViewText.Contains($needle)) {
         throw "SettingsView missing iPhone clipboard pairing import support: $needle"
@@ -607,7 +621,12 @@ foreach ($needle in @(
     '["http", "https"].contains',
     "url.host != nil",
     "bridgeToken = `"`"",
-    "config.token ?? `"`""
+    "config.token ?? `"`"",
+    "isConfiguredForDevice",
+    "applyPairingInput",
+    "pairingText",
+    "CaptureFileStore.hasSharedAppGroup",
+    "return .standard"
 )) {
     if (-not $captureSettingsStoreText.Contains($needle)) {
         throw "CaptureSettingsStore missing safe pairing import behavior: $needle"
@@ -705,6 +724,15 @@ foreach ($needle in @(
     }
 }
 foreach ($needle in @(
+    'path: "captures/list"',
+    "func listRemoteCaptures() async throws -> [CaptureItem]",
+    "ListCaptureResponse"
+)) {
+    if (-not $syncClientText.Contains($needle)) {
+        throw "SyncClient missing remote library support: $needle"
+    }
+}
+foreach ($needle in @(
     "struct SyncPushResult",
     "var item: CaptureItem?"
 )) {
@@ -736,7 +764,9 @@ foreach ($needle in @(
     "existing.syncError = nil",
     "return existing",
     "return item",
-    "isPlaceholderTitle"
+    "isPlaceholderTitle",
+    "sharedContainerURL",
+    "hasSharedAppGroup"
 )) {
     if (-not $captureFileStoreText.Contains($needle)) {
         throw "CaptureFileStore missing queue durability/deduplication logic: $needle"
@@ -753,7 +783,9 @@ foreach ($needle in @(
     '"Queue"',
     '"Processed"',
     "JSONEncoder.captureEncoder",
-    "JSONDecoder.captureDecoder"
+    "JSONDecoder.captureDecoder",
+    "CaptureFileStore.hasSharedAppGroup",
+    "return .standard"
 )) {
     if (-not $cloudRelayStoreText.Contains($needle)) {
         throw "CloudRelayStore missing persistent iCloud relay behavior: $needle"
@@ -845,11 +877,14 @@ foreach ($needle in @(
     "/captures/read",
     "enrich_capture_in_background",
     "process_cloud_relay_file",
+    "list_capture_items",
+    '"/captures/list"',
     "start_cloud_relay_worker",
     "ensure_claude_rules",
     "should_replace_summary",
     "ensure_agents_rules",
     "write_ai_learning_context",
+    "atomic_write_text",
     $aiContextFile,
     "Counter(",
     "metadata.get(`"description`") and should_replace_summary",
@@ -992,7 +1027,13 @@ foreach ($needle in @(
     "items[offset] = pendingDelete",
     $pendingDeleteInProgress,
     "updated.status = .queued",
-    "updated.syncError = nil"
+    "updated.syncError = nil",
+    "func refreshRemoteLibrary() async",
+    "client.listRemoteCaptures()",
+    "mergeRemoteLibrary",
+    "remoteItems where remoteItem.status != .deleted",
+    "hasNewerLocalChange",
+    "await refreshRemoteLibrary()"
 )) {
     if (-not $captureListModelText.Contains($needle)) {
         throw "CaptureListModel missing offline delete queue support: $needle"
@@ -1067,15 +1108,17 @@ foreach ($needle in @(
     "exclamationmark.triangle",
     "xmark.circle.fill",
     "CaptureThumbnailView(url: thumbnail)",
-    "item.metadata?.thumbnail"
+    "item.metadata?.thumbnail",
+    "await model.refreshRemoteLibrary()",
+    "if model.lastHealth?.ok == true"
 )) {
     if (-not $contentViewText.Contains($needle)) {
         throw "ContentView missing global sync error visibility: $needle"
     }
 }
 $syncQueuedTriggerCount = ([regex]::Matches($contentViewText, [regex]::Escape("Task { await model.syncQueued() }"))).Count
-if ($syncQueuedTriggerCount -lt 3) {
-    throw "ContentView must trigger immediate sync after add, after editor save, and from toolbar."
+if ($syncQueuedTriggerCount -lt 2) {
+    throw "ContentView must trigger immediate sync after add and editor save."
 }
 $regenerateSyncPattern = [regex]::Escape("let updated = await model.regenerateDrafts(for: item)") + "[\s\S]*?" + [regex]::Escape("await model.syncQueued()") + "[\s\S]*?" + [regex]::Escape("return updated")
 if (-not [regex]::IsMatch($contentViewText, $regenerateSyncPattern)) {
@@ -1176,7 +1219,15 @@ foreach ($needle in @(
     "urls.append(contentsOf: detectedURLs)",
     "NSExtensionJavaScriptPreprocessingResultsKey",
     "documentURL",
-    "webpageURL"
+    "webpageURL",
+    "UIDocumentPickerDelegate",
+    "importPairingFromClipboard",
+    "CaptureSettingsStore.applyPairingInput",
+    "CaptureSettingsStore.isConfiguredForDevice",
+    "UIDocumentPickerViewController(forOpeningContentTypes: [.folder]",
+    "CloudRelayStore.configure(folderURL: folderURL)",
+    "showRecoveryActions",
+    "iCloud 离线中转已启用"
 )) {
     if (-not $shareExtensionText.Contains($needle)) {
         throw "Share extension missing property-list webpage share support: $needle"

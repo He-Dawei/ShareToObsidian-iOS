@@ -83,7 +83,14 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
             path = parsed_path.path
             query = parse_qs(parsed_path.query)
             fast = query.get("fast", ["0"])[0] == "1"
-            if path not in {"/captures", "/drafts", "/metadata", "/captures/delete", "/captures/read"}:
+            if path not in {
+                "/captures",
+                "/drafts",
+                "/metadata",
+                "/captures/delete",
+                "/captures/read",
+                "/captures/list",
+            }:
                 self.write_error_json(404, "NOT_FOUND", f"Unknown endpoint: {path}")
                 return
             if not authorized(self.headers.get("Authorization"), config.get("token", "")):
@@ -94,6 +101,9 @@ def handler_factory(config: dict, write_lock: threading.Lock | None = None):
             payload = self.rfile.read(length)
             try:
                 item = json.loads(payload.decode("utf-8"))
+                if path == "/captures/list":
+                    self.write_json({"ok": True, "items": list_capture_items(config)})
+                    return
                 if path == "/captures/delete":
                     with write_lock:
                         result = delete_capture_note(config, item)
@@ -348,10 +358,10 @@ def write_capture_note(config: dict, item: dict) -> Path:
         filename = f"{created:%Y-%m-%d}-{slugify(title)}.md"
         note_path = unique_path(root / filename)
     item["remoteNotePath"] = note_path.relative_to(notes_root(config)).as_posix()
-    note_path.write_text(markdown.strip() + "\n", encoding="utf-8")
+    atomic_write_text(note_path, markdown.strip() + "\n")
 
     raw_path = notes_root(config) / config.get("inbox_subdir", "00_Inbox") / f"{note_path.stem}.json"
-    raw_path.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(raw_path, json.dumps(item, ensure_ascii=False, indent=2))
     return note_path
 
 
@@ -396,6 +406,39 @@ def read_capture_item(config: dict, payload: dict) -> dict:
     item = json.loads(raw_path.read_text(encoding="utf-8"))
     item["remoteNotePath"] = note_path.relative_to(root).as_posix()
     return item
+
+
+def list_capture_items(config: dict) -> list[dict]:
+    root = notes_root(config).resolve()
+    inbox = root / config.get("inbox_subdir", "00_Inbox")
+    items_by_id: dict[str, dict] = {}
+    if inbox.exists():
+        for raw_path in inbox.glob("*.json"):
+            try:
+                item = json.loads(raw_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(item, dict):
+                continue
+            capture_id = str(item.get("id") or "").strip().lower()
+            if not capture_id:
+                continue
+            if not item.get("remoteNotePath"):
+                note_path = root / "10_Notes" / f"{raw_path.stem}.md"
+                if note_path.exists():
+                    item["remoteNotePath"] = note_path.relative_to(root).as_posix()
+            items_by_id[capture_id] = item
+
+    for tombstone in load_capture_tombstones(config):
+        capture_id = str(tombstone.get("id") or "").strip().lower()
+        if capture_id:
+            items_by_id[capture_id] = tombstone
+
+    return sorted(
+        items_by_id.values(),
+        key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""),
+        reverse=True,
+    )
 
 
 def tombstone_store_path(config: dict) -> Path:
@@ -822,7 +865,7 @@ def remove_note_from_indexes(root: Path, note_path: Path) -> None:
             continue
         lines = path.read_text(encoding="utf-8").splitlines()
         kept = [line for line in lines if wiki not in line and rel not in line]
-        path.write_text("\n".join(kept).rstrip() + "\n", encoding="utf-8")
+        atomic_write_text(path, "\n".join(kept).rstrip() + "\n")
 
 
 def enrich_capture(
@@ -1997,7 +2040,7 @@ def write_framework_index(config: dict, root: Path, records: list[dict]) -> None
             f"`{record['platform']}` {tags} - {record['title']}"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
 def write_platform_index(root: Path, records: list[dict]) -> None:
@@ -2136,7 +2179,19 @@ def write_action_pool(root: Path, records: list[dict]) -> None:
 def write_knowledge_file(root: Path, filename: str, lines: list[str]) -> None:
     path = root / "90_Knowledge" / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def notes_root(config: dict) -> Path:

@@ -5,7 +5,11 @@ enum CloudRelayStore {
     private static let folderNameKey = "cloudRelayFolderName"
 
     private static var defaults: UserDefaults {
-        UserDefaults(suiteName: CaptureFileStore.appGroupIdentifier) ?? .standard
+        if CaptureFileStore.hasSharedAppGroup,
+           let sharedDefaults = UserDefaults(suiteName: CaptureFileStore.appGroupIdentifier) {
+            return sharedDefaults
+        }
+        return .standard
     }
 
     static var isConfigured: Bool {

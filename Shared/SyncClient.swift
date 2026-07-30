@@ -11,6 +11,7 @@ struct SyncClient {
         static let draft: TimeInterval = 90
         static let metadata: TimeInterval = 45
         static let remoteCapture: TimeInterval = 10
+        static let remoteLibrary: TimeInterval = 20
         static let delete: TimeInterval = 15
     }
 
@@ -65,6 +66,20 @@ struct SyncClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validateHTTPResponse(response, data: data)
         return try JSONDecoder.captureDecoder.decode(ReadCaptureResponse.self, from: data).item
+    }
+
+    func listRemoteCaptures() async throws -> [CaptureItem] {
+        var request = makeRequest(
+            path: "captures/list",
+            method: "POST",
+            timeoutInterval: Timeout.remoteLibrary
+        )
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{}".utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateHTTPResponse(response, data: data)
+        return try JSONDecoder.captureDecoder.decode(ListCaptureResponse.self, from: data).items
     }
 
     func deleteRemoteNote(path: String) async throws {
@@ -145,6 +160,11 @@ private struct ReadCaptureRequest: Codable {
 private struct ReadCaptureResponse: Codable {
     var ok: Bool
     var item: CaptureItem
+}
+
+private struct ListCaptureResponse: Codable {
+    var ok: Bool
+    var items: [CaptureItem]
 }
 
 private struct BridgeErrorEnvelope: Codable, Hashable {

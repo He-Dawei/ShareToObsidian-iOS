@@ -6,8 +6,16 @@ import Darwin
 enum CaptureFileStore {
     static let appGroupIdentifier = "group.com.hdwei.ShareToObsidian"
 
+    static var sharedContainerURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+    }
+
+    static var hasSharedAppGroup: Bool {
+        sharedContainerURL != nil
+    }
+
     static var containerURL: URL {
-        if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) {
+        if let url = sharedContainerURL {
             return url
         }
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

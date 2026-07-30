@@ -5,7 +5,35 @@ enum CaptureSettingsStore {
     private static let bridgeTokenKey = "bridgeToken"
     private static let didMigrateKey = "didMigrateSettingsToAppGroup"
     private static var defaults: UserDefaults {
-        UserDefaults(suiteName: CaptureFileStore.appGroupIdentifier) ?? .standard
+        if CaptureFileStore.hasSharedAppGroup,
+           let sharedDefaults = UserDefaults(suiteName: CaptureFileStore.appGroupIdentifier) {
+            return sharedDefaults
+        }
+        return .standard
+    }
+
+    static var isConfiguredForDevice: Bool {
+        guard let url = URL(string: bridgeAddress),
+              let host = url.host?.lowercased(),
+              !["127.0.0.1", "localhost", "::1"].contains(host) else {
+            return false
+        }
+        return !bridgeToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static var pairingText: String {
+        let config = BridgePairingConfig(
+            bridgeURL: bridgeAddress,
+            bridgeAddress: nil,
+            token: bridgeToken,
+            notesRoot: nil,
+            createdAt: nil
+        )
+        guard let data = try? JSONEncoder().encode(config),
+              let text = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return text
     }
 
     static var bridgeAddress: String {
@@ -82,6 +110,17 @@ enum CaptureSettingsStore {
             notesRoot: nil,
             createdAt: nil
         )
+    }
+
+    static func applyPairingInput(_ text: String) throws -> BridgePairingConfig {
+        let cleaned = text
+            .replacingOccurrences(of: "\u{feff}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: cleaned),
+           url.scheme?.lowercased() == "sharetoobsidian" {
+            return try applyPairingURL(url)
+        }
+        return try applyPairingText(cleaned)
     }
 
     private static func isValidBridgeAddress(_ value: String) -> Bool {

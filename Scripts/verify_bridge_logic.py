@@ -232,6 +232,10 @@ def main() -> int:
             assert completed["lastSyncedAt"]
             assert completed["syncError"] is None
             assert not bridge.should_enqueue_background(config, completed)
+            listed = bridge.list_capture_items(config)
+            listed_item = next(value for value in listed if value["id"] == completed["id"])
+            assert listed_item["status"] == "synced"
+            assert listed_item["remoteNotePath"] == relative_path
 
             stale = dict(background_item)
             stale["url"] = "https://example.com/stale-copy"
@@ -291,6 +295,8 @@ def main() -> int:
             assert tombstone is not None
             assert tombstone["status"] == "deleted"
             assert bridge.read_capture_item(config, {"path": relative_path})["status"] == "deleted"
+            listed_deleted = bridge.list_capture_items(config)
+            assert next(value for value in listed_deleted if value["id"] == completed["id"])["status"] == "deleted"
             bridge.enrich_capture_in_background(config, completed, bridge.threading.Lock())
             assert not note_path.exists()
         finally:

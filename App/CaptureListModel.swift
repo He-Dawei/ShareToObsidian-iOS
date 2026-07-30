@@ -222,6 +222,9 @@ final class CaptureListModel {
         while !Task.isCancelled {
             reload()
             await refreshHealth()
+            if lastHealth?.ok == true {
+                await refreshRemoteLibrary()
+            }
             await syncIfPossible()
 
             do {
@@ -248,6 +251,24 @@ final class CaptureListModel {
         }
     }
 
+    func refreshRemoteLibrary() async {
+        guard let baseURL = URL(string: bridgeAddress) else {
+            return
+        }
+        do {
+            let client = SyncClient(bridgeBaseURL: baseURL, bearerToken: bridgeToken)
+            let remoteItems = try await client.listRemoteCaptures()
+            try CaptureFileStore.update { currentItems in
+                mergeRemoteLibrary(remoteItems, into: currentItems)
+            }
+            reload()
+            lastError = nil
+            lastStatusMessage = "已回读电脑收藏"
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     func importPairing(text: String) async {
         do {
             _ = try CaptureSettingsStore.applyPairingText(text)
@@ -256,6 +277,9 @@ final class CaptureListModel {
             lastError = nil
             lastStatusMessage = "配对配置已导入"
             await refreshHealth()
+            if lastHealth?.ok == true {
+                await refreshRemoteLibrary()
+            }
         } catch {
             lastError = "配对配置无效：\(error.localizedDescription)"
         }
@@ -269,6 +293,9 @@ final class CaptureListModel {
             lastError = nil
             lastStatusMessage = "配对链接已导入"
             await refreshHealth()
+            if lastHealth?.ok == true {
+                await refreshRemoteLibrary()
+            }
         } catch {
             lastError = "配对链接无效：\(error.localizedDescription)"
         }
@@ -421,6 +448,32 @@ final class CaptureListModel {
             merged.append(snapshotItem)
         }
         return merged
+    }
+
+    private func mergeRemoteLibrary(
+        _ remoteItems: [CaptureItem],
+        into localItems: [CaptureItem]
+    ) -> [CaptureItem] {
+        let deletedIDs = Set(
+            remoteItems
+                .filter { $0.status == .deleted }
+                .map(\.id)
+        )
+        var merged = localItems.filter { !deletedIDs.contains($0.id) }
+
+        for remoteItem in remoteItems where remoteItem.status != .deleted {
+            if let index = merged.firstIndex(where: { $0.id == remoteItem.id }) {
+                let localItem = merged[index]
+                let hasNewerLocalChange = localItem.status != .synced
+                    && localItem.updatedAt > remoteItem.updatedAt
+                if !hasNewerLocalChange {
+                    merged[index] = remoteItem
+                }
+            } else {
+                merged.append(remoteItem)
+            }
+        }
+        return merged.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private func shouldEnrichSyncedItem(_ item: CaptureItem) -> Bool {

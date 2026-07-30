@@ -23,6 +23,17 @@ struct SettingsView: View {
                     Button("同步所有待处理") {
                         Task { await model.syncQueued() }
                     }
+                    Button {
+                        Task { await model.refreshRemoteLibrary() }
+                    } label: {
+                        Label("回读电脑收藏", systemImage: "icloud.and.arrow.down")
+                    }
+                    Button {
+                        UIPasteboard.general.string = CaptureSettingsStore.pairingText
+                    } label: {
+                        Label("复制扩展配对配置", systemImage: "doc.on.doc")
+                    }
+                    .disabled(!CaptureSettingsStore.isConfiguredForDevice)
                     Button("发送验收收藏") {
                         Task { await model.createVerificationCapture() }
                     }
