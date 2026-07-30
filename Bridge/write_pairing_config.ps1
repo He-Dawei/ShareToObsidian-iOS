@@ -48,12 +48,8 @@ $Json = $Pairing | ConvertTo-Json -Depth 4
 $OutputFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
 [System.IO.File]::WriteAllText($OutputFullPath, $Json, $Utf8NoBom)
 
-$VaultPairingPath = Join-Path (Join-Path $Config.obsidian_vault $Config.notes_subdir) "pairing.local.json"
-[System.IO.File]::WriteAllText($VaultPairingPath, $Json, $Utf8NoBom)
-
 Write-Host "Wrote pairing config:"
 Write-Host $OutputFullPath
-Write-Host $VaultPairingPath
 Write-Host "Bridge URL: $BridgeURL"
 Write-Host "Token: hidden. Use -ShowSecret only if you need to inspect the JSON."
 

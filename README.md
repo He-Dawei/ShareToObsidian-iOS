@@ -260,7 +260,7 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\wait_for_iphone_verification.
 生成手机配对配置：
 
 ```powershell
-cd C:\Users\44527\Documents\Codex\2026-07-24\codex-reconnecting-codex-env-3\outputs\share-to-obsidian-ios\Bridge
+cd C:\Users\44527\ios-project\Bridge
 .\export_pairing_for_iphone.ps1
 ```
 
@@ -270,15 +270,13 @@ cd C:\Users\44527\Documents\Codex\2026-07-24\codex-reconnecting-codex-env-3\outp
 Bridge\pairing.iphone.json
 Bridge\pairing.iphone.url.txt
 Bridge\pairing.iphone.html
-E:\44527\Documents\claude仓库\移动收藏\pairing.iphone.json
-E:\44527\Documents\claude仓库\移动收藏\pairing.iphone.html
 ```
 
 它还会把 `sharetoobsidian://pair?...` 配对深链复制到 Windows 剪贴板。把这个链接发到自己的 iPhone 并打开，App 会自动导入 Bridge URL / Token 并检查连接。也可以打开 `pairing.iphone.html`，点击里面的配对按钮。
 
 如果不方便打开深链，也可以把 `pairing.iphone.json` 粘贴到 iPhone App 的“同步设置”→“快速配对”，点“导入配对配置”，再点“检查连接”。
 
-`pairing.iphone.json`、`pairing.iphone.url.txt` 和 `pairing.iphone.html` 都包含 Bridge Token，只发给自己的 iPhone，不要公开分享。需要更换 token 时：
+`pairing.iphone.json`、`pairing.iphone.url.txt` 和 `pairing.iphone.html` 都包含 Bridge Token，只保存在本机 `Bridge` 目录，不写入 Obsidian 学习区；只发给自己的 iPhone，不要公开分享。需要更换 token 时：
 
 ```powershell
 .\write_pairing_config.ps1 -RotateToken

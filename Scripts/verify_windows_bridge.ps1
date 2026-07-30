@@ -523,6 +523,9 @@ foreach ($needle in @(
         throw "iPhone pairing export script missing expected safe export behavior: $needle"
     }
 }
+if ($pairingExportText.Contains("VaultPairing")) {
+    throw "iPhone pairing export must not copy token-bearing files into the Obsidian vault."
+}
 
 $pairingWriteText = Get-Content -LiteralPath (Join-Path $repoRoot "Bridge\write_pairing_config.ps1") -Raw -Encoding UTF8
 foreach ($needle in @(
@@ -535,6 +538,9 @@ foreach ($needle in @(
     if (-not $pairingWriteText.Contains($needle)) {
         throw "Bridge pairing config writer missing safe token behavior: $needle"
     }
+}
+if ($pairingWriteText.Contains("VaultPairing")) {
+    throw "Pairing config writer must not copy token-bearing files into the Obsidian vault."
 }
 
 $readmeText = Get-Content -LiteralPath (Join-Path $repoRoot "README.md") -Raw -Encoding UTF8

@@ -75,11 +75,6 @@ $Html = @"
 [System.IO.File]::WriteAllText($OutputURLFullPath, $PairingURL, $Utf8NoBom)
 [System.IO.File]::WriteAllText($OutputHTMLFullPath, $Html, $Utf8NoBom)
 
-$VaultPairingPath = Join-Path (Join-Path $Config.obsidian_vault $Config.notes_subdir) "pairing.iphone.json"
-$VaultPairingHTMLPath = Join-Path (Join-Path $Config.obsidian_vault $Config.notes_subdir) "pairing.iphone.html"
-[System.IO.File]::WriteAllText($VaultPairingPath, $Json, $Utf8NoBom)
-[System.IO.File]::WriteAllText($VaultPairingHTMLPath, $Html, $Utf8NoBom)
-
 try {
     Set-Clipboard -Value $PairingURL
     $ClipboardStatus = "copied"
@@ -91,8 +86,6 @@ Write-Host "Wrote iPhone pairing config:"
 Write-Host $OutputFullPath
 Write-Host $OutputURLFullPath
 Write-Host $OutputHTMLFullPath
-Write-Host $VaultPairingPath
-Write-Host $VaultPairingHTMLPath
 Write-Host "Bridge URL: $BridgeURL"
 Write-Host "Clipboard pairing link: $ClipboardStatus"
 Write-Host "Token: hidden. Pairing JSON/URL/HTML files contain the token. Use -ShowSecret only if you need to inspect them."
